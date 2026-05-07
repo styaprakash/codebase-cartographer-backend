@@ -1,0 +1,19 @@
+server:
+  port: 8080
+
+
+spring:
+  application:
+    name: codebase-cartographer-api
+  datasource:
+    url: jdbc:postgresql://localhost:5432/cartographer
+    username: postgres
+    password: yourpassword
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+
+
+allowed:
+  origins: "http://localhost:3000"
