@@ -1,14 +1,14 @@
 package com.codebasecartographer.api.repository;
 
-import com.codebasecartographer.api.entity.QueryLog;
+import java.time.LocalDateTime;
+import java.util.List;
+
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.data.jpa.repository.Modifying;
 
-import java.util.List;
-import java.util.Optional;
-import java.time.LocalDateTime;
+import com.codebasecartographer.api.entity.QueryLog;
 
 @Repository
 

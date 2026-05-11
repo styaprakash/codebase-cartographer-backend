@@ -2,7 +2,13 @@ package com.codebasecartographer.api.entity;
 
 import java.time.LocalDateTime;
 
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.Table;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -22,7 +28,7 @@ public class User {
     @GeneratedValue(strategy = GenerationType.UUID) // Auto-generate a UUID for the primary key.
     private String id;
 
-    //github_id is teh unique identifier for the user in github and it can't be null
+    //github_id is the unique identifier for the user in github and it can't be null
     @Column(nullable = false, unique = true)
     private String githubId;
 
