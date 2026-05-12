@@ -1,11 +1,12 @@
 package com.codebasecartographer.api.repository;
 
-import com.codebasecartographer.api.entity.Repository;
-import com.codebasecartographer.api.enums.RepositoryStatus;
-import org.springframework.data.jpa.repository.JpaRepository;
-// import org.springframework.stereotype.Repository;
 import java.util.List;
 import java.util.Optional;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import com.codebasecartographer.api.entity.Repository;
+import com.codebasecartographer.api.enums.RepositoryStatus;
 
 // @Repository
 @org.springframework.stereotype.Repository
@@ -28,4 +29,7 @@ public interface RepositoryRepository extends JpaRepository<Repository, String> 
     // Check if user already imported this GitHub repo
     // WHERE user_id = ? AND github_repo_id = ?
     Optional<Repository> findByUserIdAndGithubRepoId(String userId, String githubRepoId);
+
+    boolean existsByUserIdAndGithubRepoId(String userId, String githubRepoId);
+
 }
