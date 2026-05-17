@@ -7,6 +7,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.codebasecartographer.api.dto.response.UserResponse;
 import com.codebasecartographer.api.entity.User;
+import com.codebasecartographer.api.exception.ResourceNotFoundException;
 import com.codebasecartographer.api.repository.UserRepository;
 
 @Service
@@ -49,8 +50,7 @@ public class UserService {
     //Method 2: Called by GET /api/me, return logged in user's info as DTO
     public UserResponse getUserById (String id){
         User user = userRepository.findById(id)
-            // orElseThrow — if user not found, throw exception
-            .orElseThrow( () -> new RuntimeException("User not found: " + id));
+            .orElseThrow(() -> new ResourceNotFoundException("User", "id", id));
 
         return toResponse(user);
     }

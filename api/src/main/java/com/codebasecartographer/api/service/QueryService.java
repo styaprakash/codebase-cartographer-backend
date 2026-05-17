@@ -1,5 +1,6 @@
 package com.codebasecartographer.api.service;
 
+import java.security.Guard;
 import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -41,6 +42,7 @@ public class QueryService {
     // Called by QueryController on POST /api/repos/:id/query
     @Transactional
     public QueryResponse query(String userId, String repoId, String question){
+        // Guard checks (repo exists, user owns it, repo is indexed, query limit not reached) before processing the question
         Repository repo = verifyRepoAccess(userId, repoId);
 
         //Repo must be fully indexed before querying
@@ -113,9 +115,11 @@ public class QueryService {
     // Saves question + answer to query_logs table
     // Called after every successful query
     private void saveQueryLog(String userId, String repoId, String question, String answer, int tokensUsed) {
+        //check if the user exists
         User user = userRepository.findById(userId)
             .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
 
+        //check if the repository exists
         Repository repo = repositoryRepository.findById(repoId)
             .orElseThrow(() -> new ResourceNotFoundException("Repository", "id", repoId));
 
