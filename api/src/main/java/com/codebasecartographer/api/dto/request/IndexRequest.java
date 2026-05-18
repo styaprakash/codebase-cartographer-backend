@@ -15,6 +15,14 @@ public class IndexRequest {
     @NotBlank(message="Github Repository ID is required")
     private String githubRepoId;
 
-    @Builder.Default
-    private String branch = "main";
+    @NotBlank(message = "Repository name is required")
+    private String name;
+
+    @NotBlank(message = "Full repository name is required")
+    private String fullName;
+
+    @NotBlank(message = "Branch name is required")
+    private String branch;
+
+    private String language;
 }
