@@ -11,6 +11,7 @@ import com.codebasecartographer.api.dto.response.RepoResponse;
 import com.codebasecartographer.api.entity.Repository;
 import com.codebasecartographer.api.entity.User;
 import com.codebasecartographer.api.enums.RepositoryStatus;
+import com.codebasecartographer.api.exception.DuplicateResourceException;
 import com.codebasecartographer.api.exception.ResourceNotFoundException;
 import com.codebasecartographer.api.repository.RepositoryRepository;
 import com.codebasecartographer.api.repository.UserRepository;
@@ -56,7 +57,7 @@ public class RepoService {
         Boolean exists = repositoryRepository.existsByUserIdAndGithubRepoId(userId, githubRepoId);
 
         if(exists){
-            throw new IllegalArgumentException("Repository already imported: " + fullName);
+            throw new DuplicateResourceException("Repository", fullName);
         }
         // Find the user first (you need the User object for the FK)
         User user = userRepository.findById(userId)

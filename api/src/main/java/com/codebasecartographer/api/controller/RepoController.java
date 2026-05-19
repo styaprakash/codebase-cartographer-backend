@@ -1,13 +1,4 @@
 package com.codebasecartographer.api.controller;
-import org.springframework.web.bind.annotation.RestController;
-
-import com.codebasecartographer.api.dto.request.IndexRequest;
-import com.codebasecartographer.api.dto.response.RepoResponse;
-import com.codebasecartographer.api.service.IndexingService;
-import com.codebasecartographer.api.service.RepoService;
-
-import jakarta.validation.Valid;
-
 import java.util.List;
 
 import org.springframework.http.HttpStatus;
@@ -18,6 +9,14 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.bind.annotation.RestController;
+
+import com.codebasecartographer.api.dto.request.IndexRequest;
+import com.codebasecartographer.api.dto.response.RepoResponse;
+import com.codebasecartographer.api.service.IndexingService;
+import com.codebasecartographer.api.service.RepoService;
+
+import jakarta.validation.Valid;
 
 @RestController
 @RequestMapping("/api")
@@ -27,7 +26,7 @@ public class RepoController {
     private final IndexingService indexingService;
 
     //Constructor injection
-    RepoController(RepoService repoService, IndexingService indexingService){
+    public RepoController(RepoService repoService, IndexingService indexingService){
         this.repoService = repoService;
         this.indexingService = indexingService;
     }

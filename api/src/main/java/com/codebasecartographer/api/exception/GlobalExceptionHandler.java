@@ -1,13 +1,17 @@
 package com.codebasecartographer.api.exception;
 
-import org.springframework.http.ProblemDetail;
-import org.springframework.web.bind.annotation.ExceptionHandler;
-import org.springframework.web.bind.annotation.RestControllerAdvice;
-
 import java.net.URI;
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ProblemDetail;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -54,6 +58,64 @@ public class GlobalExceptionHandler {
             .forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
 
         problem.setTitle("Invalid Request");
+        problem.setType(URI.create("https://codebasecartographer.com/errors/bad-request"));
+        problem.setProperty("timestamp", LocalDateTime.now());
+
+        return problem;
+    }
+
+    // Handle custom BadRequestException
+    @ExceptionHandler(com.codebasecartographer.api.exception.BadRequestException.class)
+    public ProblemDetail handleBadRequestCustom(com.codebasecartographer.api.exception.BadRequestException ex) {
+        ProblemDetail problem = ProblemDetail
+            .forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+
+        problem.setTitle("Invalid Request");
+        problem.setType(URI.create("https://codebasecartographer.com/errors/bad-request"));
+        problem.setProperty("timestamp", LocalDateTime.now());
+
+        return problem;
+    }
+
+    // Handle duplicate resource errors specifically
+    @ExceptionHandler(com.codebasecartographer.api.exception.DuplicateResourceException.class)
+    public ProblemDetail handleDuplicate(com.codebasecartographer.api.exception.DuplicateResourceException ex){
+        ProblemDetail problem = ProblemDetail
+            .forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+
+        problem.setTitle("Duplicate Resource");
+        problem.setType(URI.create("https://codebasecartographer.com/errors/duplicate"));
+        problem.setProperty("timestamp", LocalDateTime.now());
+
+        return problem;
+    }
+
+    // Validation errors from @Valid annotated @RequestBody
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ProblemDetail handleValidation(MethodArgumentNotValidException ex){
+        ProblemDetail problem = ProblemDetail
+            .forStatusAndDetail(HttpStatus.BAD_REQUEST, "Validation failed");
+
+        problem.setTitle("Validation failed");
+        problem.setType(URI.create("https://codebasecartographer.com/errors/bad-request"));
+        problem.setProperty("timestamp", LocalDateTime.now());
+
+        List<Map<String,String>> errors = ex.getBindingResult().getFieldErrors()
+            .stream()
+            .map(err -> Map.of("field", err.getField(), "message", err.getDefaultMessage()))
+            .collect(Collectors.toList());
+
+        problem.setProperty("errors", errors);
+        return problem;
+    }
+
+    // Malformed JSON / unreadable message
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ProblemDetail handleUnreadable(HttpMessageNotReadableException ex){
+        ProblemDetail problem = ProblemDetail
+            .forStatusAndDetail(HttpStatus.BAD_REQUEST, "Invalid request content.");
+
+        problem.setTitle("Bad Request");
         problem.setType(URI.create("https://codebasecartographer.com/errors/bad-request"));
         problem.setProperty("timestamp", LocalDateTime.now());
 

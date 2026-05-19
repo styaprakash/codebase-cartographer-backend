@@ -1,5 +1,7 @@
 package com.codebasecartographer.api.service;
 
+import org.springframework.stereotype.Service;
+
 import com.codebasecartographer.api.dto.response.RepoResponse;
 import com.codebasecartographer.api.entity.Repository;
 import com.codebasecartographer.api.enums.RepositoryStatus;
@@ -9,6 +11,7 @@ import com.codebasecartographer.api.repository.RepositoryRepository;
 
 import jakarta.transaction.Transactional;
 
+@Service
 public class IndexingService {
     private final RepositoryRepository repositoryRepository;
     private final CodeChunkRepository codeChunkRepository;

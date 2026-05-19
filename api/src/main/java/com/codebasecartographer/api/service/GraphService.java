@@ -1,18 +1,22 @@
 package com.codebasecartographer.api.service;
 
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+import org.springframework.stereotype.Service;
+
 import com.codebasecartographer.api.dto.response.GraphResponse;
-import com.codebasecartographer.api.dto.response.GraphResponse.GraphNode;
 import com.codebasecartographer.api.dto.response.GraphResponse.GraphEdge;
+import com.codebasecartographer.api.dto.response.GraphResponse.GraphNode;
 import com.codebasecartographer.api.entity.CodeChunk;
 import com.codebasecartographer.api.entity.Repository;
 import com.codebasecartographer.api.enums.RepositoryStatus;
+import com.codebasecartographer.api.exception.BadRequestException;
 import com.codebasecartographer.api.exception.ResourceNotFoundException;
 import com.codebasecartographer.api.repository.CodeChunkRepository;
 import com.codebasecartographer.api.repository.RepositoryRepository;
-import org.springframework.stereotype.Service;
-
-import java.util.*;
-import java.util.stream.Collectors;
 
 @Service
 public class GraphService {
@@ -52,7 +56,7 @@ public class GraphService {
         // Step 2 — Repo must be fully indexed
         // No chunks in DB = no graph to build
         if (repo.getStatus() != RepositoryStatus.INDEXED) {
-            throw new IllegalArgumentException(
+            throw new BadRequestException(
                 "Repository must be fully indexed before viewing dependency graph. " +
                 "Current status: " + repo.getStatus());
         }
@@ -220,6 +224,21 @@ public class GraphService {
                 : filePath;                            // no slash → use as-is
     }
 
+    // Returns list of unique file paths for the file tree (left panel)
+    public List<String> getFilePaths(String userId, String repoId) {
+
+        // Security check first
+        verifyRepoAccess(userId, repoId);
+
+        // Get all chunks → extract unique file paths
+        return codeChunkRepository
+                .findByRepository_Id(repoId)
+                .stream()
+                .map(CodeChunk::getFilePath)  // get filePath from each chunk
+                .distinct()                    // remove duplicates
+                .sorted()                      // alphabetical order
+                .collect(Collectors.toList());
+    }
     // ── Verify Repo Access ────────────────────────────────────────
     // Security check reused across all public methods
     // Ensures repo exists AND belongs to this specific user

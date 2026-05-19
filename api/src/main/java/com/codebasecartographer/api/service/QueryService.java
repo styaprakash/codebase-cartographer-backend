@@ -1,24 +1,24 @@
 package com.codebasecartographer.api.service;
 
-import java.security.Guard;
 import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.codebasecartographer.api.dto.response.QueryResponse;
 import com.codebasecartographer.api.entity.QueryLog;
 import com.codebasecartographer.api.entity.Repository;
 import com.codebasecartographer.api.entity.User;
 import com.codebasecartographer.api.enums.RepositoryStatus;
+import com.codebasecartographer.api.exception.BadRequestException;
 import com.codebasecartographer.api.exception.RateLimitException;
 import com.codebasecartographer.api.exception.ResourceNotFoundException;
 import com.codebasecartographer.api.repository.CodeChunkRepository;
 import com.codebasecartographer.api.repository.QueryLogRepository;
 import com.codebasecartographer.api.repository.RepositoryRepository;
 import com.codebasecartographer.api.repository.UserRepository;
-import org.springframework.transaction.annotation.Transactional;
 
 
 @Service
@@ -47,7 +47,7 @@ public class QueryService {
 
         //Repo must be fully indexed before querying
         if(repo.getStatus() != RepositoryStatus.INDEXED){
-            throw new IllegalArgumentException(
+            throw new BadRequestException(
                 "Repository is not ready for querying as it is not indexed. Current status: " + repo.getStatus()
             );
         }
