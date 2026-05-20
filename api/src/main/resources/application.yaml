@@ -24,3 +24,8 @@ spring:
 
 allowed:
   origins: "http://localhost:3000"
+
+# JWT Configuration
+jwt:
+  secret: "codebase-cartographer-secret-key-must-be-at-least-256-bits-long-for-hs256"
+  expiration: 86400000  # 24 hours in milliseconds
