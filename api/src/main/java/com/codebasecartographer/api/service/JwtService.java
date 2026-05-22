@@ -39,7 +39,7 @@ public class JwtService {
     // Called on every request by JwtAuthFilter
     // Reads userId from token payload
     public String extractUserId(String token){
-        return parseClaims(token).getId();
+        return parseClaims(token).getSubject();
     }
 
     // Checks:

@@ -126,6 +126,8 @@ public class GlobalExceptionHandler {
     // Safety net — catches anything unhandled
     @ExceptionHandler(Exception.class)
     public ProblemDetail handleGeneral(Exception ex) {
+        ex.printStackTrace();
+
         ProblemDetail problem = ProblemDetail
             .forStatusAndDetail(HttpStatus.INTERNAL_SERVER_ERROR,
                                "Something went wrong. Please try again.");

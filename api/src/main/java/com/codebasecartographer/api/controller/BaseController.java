@@ -8,9 +8,10 @@ public abstract class BaseController {
     // Every controller that extends this gets this method for free
     // Reads userId that JwtAuthFilter stored in SecurityContext
     protected String getCurrentUserId() {
-        return (String) SecurityContextHolder
-                .getContext()
-                .getAuthentication()
-                .getPrincipal();
+        var auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null) {
+            throw new IllegalStateException("No authentication found in security context");
+        }
+        return (String) auth.getPrincipal();
     }
 }

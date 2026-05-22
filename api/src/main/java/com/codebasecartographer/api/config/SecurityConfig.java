@@ -5,8 +5,11 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+
+import jakarta.servlet.http.HttpServletResponse;
 
 import com.codebasecartographer.api.filter.JwtAuthFilter;
 
@@ -23,17 +26,30 @@ public class SecurityConfig {
 
     
     @Bean
+    public AuthenticationEntryPoint authenticationEntryPoint() {
+        return (request, response, authException) -> {
+            response.setContentType("application/json");
+            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+            response.getWriter().write("{\"error\": \"Authentication required\"}");
+        };
+    }
+
+    @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http 
             .csrf(csrf -> csrf.disable()) // Disable CSRF for now
             .sessionManagement(session -> session
                 .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
             )
+
+            .exceptionHandling(exc -> exc
+                .authenticationEntryPoint(authenticationEntryPoint())
+            )
             
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/api/auth/**") // GitHub OAuth callback
-                .authenticated()
-                .anyRequest().permitAll() // Allow all requests (no auth for now)
+                .requestMatchers("/api/auth/**") // All auth endpoints public
+                .permitAll()
+                .anyRequest().authenticated()
             )
 
             // Run JwtAuthFilter before Spring's default auth filter

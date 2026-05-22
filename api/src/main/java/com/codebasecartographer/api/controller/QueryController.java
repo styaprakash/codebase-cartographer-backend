@@ -13,6 +13,8 @@ import com.codebasecartographer.api.dto.request.QueryRequest;
 import com.codebasecartographer.api.dto.response.QueryResponse;
 import com.codebasecartographer.api.service.QueryService;
 
+import jakarta.validation.Valid;
+
 
 @RestController
 @RequestMapping("/api")
@@ -29,7 +31,7 @@ public class QueryController extends BaseController {
     @PostMapping("/repos/{id}/query")
     public QueryResponse addQuery(
         @PathVariable("id") String repoId,
-        @RequestBody QueryRequest request
+        @Valid @RequestBody QueryRequest request
     ){
         String userId = getCurrentUserId();
         String question = request.getQuestion();

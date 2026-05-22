@@ -1,0 +1,313 @@
+{
+	"info": {
+		"name": "Codebase Cartographer API",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "baseUrl",
+			"value": "http://localhost:8080",
+			"type": "string"
+		},
+		{
+			"key": "token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "repoId",
+			"value": "",
+			"type": "string"
+		}
+	],
+	"auth": {
+		"type": "bearer",
+		"bearer": [
+			{
+				"key": "token",
+				"value": "{{token}}",
+				"type": "string"
+			}
+		]
+	},
+	"item": [
+		{
+			"name": "Auth",
+			"item": [
+				{
+					"name": "GitHub OAuth Callback",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const jsonData = pm.response.json();",
+									"if (jsonData.token) {",
+									"    pm.collectionVariables.set(\"token\", jsonData.token);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"githubId\": \"string\",\n  \"name\": \"string\",\n  \"email\": \"string\",\n  \"accessToken\": \"string\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/auth/callback",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "auth", "callback"]
+						},
+						"auth": {
+							"type": "noauth"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Logout",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/auth/logout",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "auth", "logout"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "User",
+			"item": [
+				{
+					"name": "Get Current User",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/me",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "me"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Account",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/me",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "me"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Indexed Data",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/me/data",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "me", "data"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Repositories",
+			"item": [
+				{
+					"name": "List Repositories",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/repos",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "repos"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Repository by ID",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/repos/{{repoId}}",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "repos", "{{repoId}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Create Repository",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"githubRepoId\": \"string\",\n  \"name\": \"string\",\n  \"fullName\": \"string\",\n  \"branch\": \"string\",\n  \"language\": \"string\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/repos",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "repos"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Trigger Repository Indexing",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/repos/{{repoId}}/index",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "repos", "{{repoId}}", "index"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Indexing Status",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/repos/{{repoId}}/status",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "repos", "{{repoId}}", "status"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Queries (RAG)",
+			"item": [
+				{
+					"name": "Ask Repository Question",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"question\": \"string\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/repos/{{repoId}}/query",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "repos", "{{repoId}}", "query"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Query History",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/repos/{{repoId}}/queries",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "repos", "{{repoId}}", "queries"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Graph & Files",
+			"item": [
+				{
+					"name": "Get Dependency Graph",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/repos/{{repoId}}/graph",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "repos", "{{repoId}}", "graph"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get File Tree",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/repos/{{repoId}}/files",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "repos", "{{repoId}}", "files"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Health",
+			"item": [
+				{
+					"name": "Health Check",
+					"request": {
+						"method": "GET",
+						"auth": {
+							"type": "noauth"
+						},
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/?name=World",
+							"host": ["{{baseUrl}}"],
+							"path": [""],
+							"query": [
+								{
+									"key": "name",
+									"value": "World"
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		}
+	]
+}
