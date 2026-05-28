@@ -12,7 +12,9 @@ import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @Service
 public class JwtService {
     private final JwtConfig jwtConfig;
@@ -51,6 +53,7 @@ public class JwtService {
             parseClaims(token);
             return true;
         }catch(JwtException | IllegalArgumentException e){
+            log.warn("JWT validation failed: {}", e.getMessage());
             return false;
         }
     }

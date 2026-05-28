@@ -20,7 +20,9 @@ import com.codebasecartographer.api.repository.QueryLogRepository;
 import com.codebasecartographer.api.repository.RepositoryRepository;
 import com.codebasecartographer.api.repository.UserRepository;
 
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @Service
 public class QueryService {
     private final RepositoryRepository repositoryRepository;
@@ -47,12 +49,14 @@ public class QueryService {
 
         //Repo must be fully indexed before querying
         if(repo.getStatus() != RepositoryStatus.INDEXED){
+            log.warn("Query attempted on non-indexed repo {} (status: {}) by user {}", repoId, repo.getStatus(), userId);
             throw new BadRequestException(
                 "Repository is not ready for querying as it is not indexed. Current status: " + repo.getStatus()
             );
         }
         // Check daily query limit (20/day)
         if(userService.isQueryLimitReached(userId)){
+            log.warn("Query rate limit reached for user {}", userId);
             throw new RateLimitException(userId, 20); // 20 queries per day limit
         }
 

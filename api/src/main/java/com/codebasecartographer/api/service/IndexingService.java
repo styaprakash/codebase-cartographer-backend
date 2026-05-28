@@ -11,6 +11,9 @@ import com.codebasecartographer.api.repository.RepositoryRepository;
 
 import jakarta.transaction.Transactional;
 
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
 @Service
 public class IndexingService {
     private final RepositoryRepository repositoryRepository;
@@ -41,6 +44,8 @@ public class IndexingService {
         if(existingChunks > 0){
             codeChunkRepository.deleteByRepository_Id(repoId);
         }
+
+        log.info("Triggering indexing for repo {} ({})", repoId, repo.getFullName());
 
         // Reset progress counters
         repo.setIndexedFiles(0);

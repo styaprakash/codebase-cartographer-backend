@@ -10,6 +10,9 @@ import com.codebasecartographer.api.entity.User;
 import com.codebasecartographer.api.exception.ResourceNotFoundException;
 import com.codebasecartographer.api.repository.UserRepository;
 
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
 @Service
 public class UserService {
     // We need UserRepository to talk to the database
@@ -59,7 +62,10 @@ public class UserService {
     public boolean isQueryLimitReached (String userId){
         //if we can't find the user
         User user = userRepository.findById(userId)
-            .orElseThrow( () -> new RuntimeException("User not found: " + userId));
+            .orElseThrow( () -> {
+                log.warn("User not found in isQueryLimitReached: {}", userId);
+                return new ResourceNotFoundException("User", "id", userId);
+            });
 
         // Check if reset is needed first
         // If queryResetAt is null (never reset) OR last reset was yesterday

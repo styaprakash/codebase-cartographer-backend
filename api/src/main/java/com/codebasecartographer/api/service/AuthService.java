@@ -6,6 +6,9 @@ import com.codebasecartographer.api.dto.response.AuthResponse;
 import com.codebasecartographer.api.dto.request.AuthCallbackRequest;
 import com.codebasecartographer.api.dto.response.UserResponse;
 
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
 @Service
 public class AuthService {
     private final UserService userService;
@@ -24,6 +27,7 @@ public class AuthService {
         //check if the user is already exist or not
         // -> existing user: update their access token
         // -> new user: create with all GitHub data
+        log.info("OAuth callback received for githubId: {}", request.getGithubId());
         UserResponse user = userService.findOrCreateUser(
             request.getGithubId(),
             request.getName(),

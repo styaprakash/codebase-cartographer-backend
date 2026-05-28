@@ -14,9 +14,11 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import lombok.extern.slf4j.Slf4j;
 
 // OncePerRequestFilter = runs exactly once per HTTP request
 
+@Slf4j
 @Component
 public class JwtAuthFilter extends OncePerRequestFilter {
     private final JwtService jwtService;
@@ -45,6 +47,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
         // Step 4 — Validate token
         if(!jwtService.validateToken(token)){
+            log.warn("Invalid or expired token for request: {} {}", request.getMethod(), request.getRequestURI());
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.getWriter().write("Invalid or expired token");
             return;

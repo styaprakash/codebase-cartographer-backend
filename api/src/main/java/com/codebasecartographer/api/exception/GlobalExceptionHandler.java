@@ -13,12 +13,15 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
     // 404 Not Found exception
     @ExceptionHandler(ResourceNotFoundException.class)
     public ProblemDetail handleResourceNotFound(ResourceNotFoundException ex){
-        // ProblemDetail.forStatusAndDetail() creates the RFC 7807 body
+        log.warn("Resource not found: {}", ex.getMessage());
         ProblemDetail problem = ProblemDetail
             .forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
         
@@ -38,6 +41,7 @@ public class GlobalExceptionHandler {
     // 429 Rate Limit
     @ExceptionHandler(RateLimitException.class)
     public ProblemDetail handleRateLimit(RateLimitException ex){
+        log.warn("Rate limit exceeded: {}", ex.getMessage());
         ProblemDetail problem = ProblemDetail
             .forStatusAndDetail(HttpStatus.TOO_MANY_REQUESTS, ex.getMessage());
 
@@ -54,6 +58,7 @@ public class GlobalExceptionHandler {
     // Thrown when request body is missing required fields
     @ExceptionHandler(IllegalArgumentException.class)
     public ProblemDetail handleBadRequest(IllegalArgumentException ex) {
+        log.warn("Invalid request argument: {}", ex.getMessage());
         ProblemDetail problem = ProblemDetail
             .forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
 
@@ -67,6 +72,7 @@ public class GlobalExceptionHandler {
     // Handle custom BadRequestException
     @ExceptionHandler(com.codebasecartographer.api.exception.BadRequestException.class)
     public ProblemDetail handleBadRequestCustom(com.codebasecartographer.api.exception.BadRequestException ex) {
+        log.warn("Bad request: {}", ex.getMessage());
         ProblemDetail problem = ProblemDetail
             .forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
 
@@ -80,6 +86,7 @@ public class GlobalExceptionHandler {
     // Handle duplicate resource errors specifically
     @ExceptionHandler(com.codebasecartographer.api.exception.DuplicateResourceException.class)
     public ProblemDetail handleDuplicate(com.codebasecartographer.api.exception.DuplicateResourceException ex){
+        log.warn("Duplicate resource: {}", ex.getMessage());
         ProblemDetail problem = ProblemDetail
             .forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
 
@@ -93,6 +100,7 @@ public class GlobalExceptionHandler {
     // Validation errors from @Valid annotated @RequestBody
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ProblemDetail handleValidation(MethodArgumentNotValidException ex){
+        log.warn("Validation failed for request: {}", ex.getMessage());
         ProblemDetail problem = ProblemDetail
             .forStatusAndDetail(HttpStatus.BAD_REQUEST, "Validation failed");
 
@@ -112,6 +120,7 @@ public class GlobalExceptionHandler {
     // Malformed JSON / unreadable message
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ProblemDetail handleUnreadable(HttpMessageNotReadableException ex){
+        log.warn("Malformed request body: {}", ex.getMessage());
         ProblemDetail problem = ProblemDetail
             .forStatusAndDetail(HttpStatus.BAD_REQUEST, "Invalid request content.");
 
@@ -126,7 +135,7 @@ public class GlobalExceptionHandler {
     // Safety net — catches anything unhandled
     @ExceptionHandler(Exception.class)
     public ProblemDetail handleGeneral(Exception ex) {
-        ex.printStackTrace();
+        log.error("Unhandled exception occurred", ex);
 
         ProblemDetail problem = ProblemDetail
             .forStatusAndDetail(HttpStatus.INTERNAL_SERVER_ERROR,

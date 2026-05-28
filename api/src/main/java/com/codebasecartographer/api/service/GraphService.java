@@ -18,6 +18,9 @@ import com.codebasecartographer.api.exception.ResourceNotFoundException;
 import com.codebasecartographer.api.repository.CodeChunkRepository;
 import com.codebasecartographer.api.repository.RepositoryRepository;
 
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
 @Service
 public class GraphService {
 
@@ -56,6 +59,7 @@ public class GraphService {
         // Step 2 — Repo must be fully indexed
         // No chunks in DB = no graph to build
         if (repo.getStatus() != RepositoryStatus.INDEXED) {
+            log.warn("Graph requested for non-indexed repo {} (status: {}) by user {}", repoId, repo.getStatus(), userId);
             throw new BadRequestException(
                 "Repository must be fully indexed before viewing dependency graph. " +
                 "Current status: " + repo.getStatus());

@@ -16,6 +16,9 @@ import com.codebasecartographer.api.exception.ResourceNotFoundException;
 import com.codebasecartographer.api.repository.RepositoryRepository;
 import com.codebasecartographer.api.repository.UserRepository;
 
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
 @Service
 public class RepoService {
     // We need RepositoryRepository to talk to the database
@@ -57,11 +60,15 @@ public class RepoService {
         Boolean exists = repositoryRepository.existsByUserIdAndGithubRepoId(userId, githubRepoId);
 
         if(exists){
+            log.warn("Duplicate repository import attempt: {}", fullName);
             throw new DuplicateResourceException("Repository", fullName);
         }
         // Find the user first (you need the User object for the FK)
         User user = userRepository.findById(userId)
-            .orElseThrow( () -> new RuntimeException("User not found: " + userId));
+            .orElseThrow( () -> {
+                log.warn("User not found in createRepo: {}", userId);
+                return new ResourceNotFoundException("User", "id", userId);
+            });
 
 
         //Build new repo entity with PENDING status
