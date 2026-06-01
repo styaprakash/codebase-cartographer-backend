@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.codebasecartographer.api.dto.request.IndexRequest;
+import com.codebasecartographer.api.dto.request.ReindexRequest;
 import com.codebasecartographer.api.dto.response.RepoResponse;
 import com.codebasecartographer.api.service.IndexingService;
 import com.codebasecartographer.api.service.RepoService;
@@ -43,7 +44,6 @@ public class RepoController extends BaseController {
 
     // GET  /api/repos/{id}
     @GetMapping("/repos/{id}")
-    @ResponseStatus(HttpStatus.CREATED)
     public RepoResponse getRepoById(
         @PathVariable("id") String id
     ){
@@ -70,10 +70,15 @@ public class RepoController extends BaseController {
     @PostMapping("/repos/{id}/index")
     @ResponseStatus(HttpStatus.ACCEPTED)
     public RepoResponse triggerIndexing(
-        @PathVariable("id") String id
+        @PathVariable("id") String id,
+        @RequestBody(required = false) ReindexRequest metadata
     ){
         String userId = getCurrentUserId();
-        return indexingService.triggerIndexing(id);
+        String name = metadata != null ? metadata.getName() : null;
+        String fullName = metadata != null ? metadata.getFullName() : null;
+        String branch = metadata != null ? metadata.getBranch() : null;
+        String language = metadata != null ? metadata.getLanguage() : null;
+        return indexingService.triggerIndexing(id, name, fullName, branch, language);
     }
 
     // GET  /api/repos/{id}/status

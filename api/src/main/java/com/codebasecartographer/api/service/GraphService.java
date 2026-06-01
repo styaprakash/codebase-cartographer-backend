@@ -17,6 +17,7 @@ import com.codebasecartographer.api.exception.BadRequestException;
 import com.codebasecartographer.api.exception.ResourceNotFoundException;
 import com.codebasecartographer.api.repository.CodeChunkRepository;
 import com.codebasecartographer.api.repository.RepositoryRepository;
+import com.codebasecartographer.api.utils.FileUtils;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -118,7 +119,7 @@ public class GraphService {
 
                             // label = just the filename e.g. "login.ts"
                             // Shown inside the node bubble on graph
-                            .label(extractFileName(filePath))
+                            .label(FileUtils.extractFileName(filePath))
 
                             // type = determines node color on React Flow graph
                             // COMPONENT → purple
@@ -212,20 +213,6 @@ public class GraphService {
 
         // Default — couldn't determine type
         return "UNKNOWN";           // gray on graph
-    }
-
-    // ── Extract File Name ─────────────────────────────────────────
-    // Gets just the filename from a full path
-    //
-    // Example:
-    // "src/auth/login.ts" → "login.ts"
-    // "com/service/UserService.java" → "UserService.java"
-    private String extractFileName(String filePath) {
-        if (filePath == null || filePath.isEmpty()) return filePath;
-        int lastSlash = filePath.lastIndexOf('/');
-        return lastSlash >= 0
-                ? filePath.substring(lastSlash + 1)  // after last /
-                : filePath;                            // no slash → use as-is
     }
 
     // Returns list of unique file paths for the file tree (left panel)

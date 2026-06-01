@@ -16,6 +16,7 @@ import lombok.NoArgsConstructor;
 public class RepoResponse {
     private String id;
     private String userId;
+    private String githubRepoId;
     private String name;
     private String fullName;
     private String branch;

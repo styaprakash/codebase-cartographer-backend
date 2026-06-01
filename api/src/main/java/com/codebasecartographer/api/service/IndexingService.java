@@ -1,15 +1,21 @@
 package com.codebasecartographer.api.service;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.codebasecartographer.api.dto.response.RepoResponse;
+import com.codebasecartographer.api.entity.CodeChunk;
 import com.codebasecartographer.api.entity.Repository;
+import com.codebasecartographer.api.enums.ChunkType;
 import com.codebasecartographer.api.enums.RepositoryStatus;
 import com.codebasecartographer.api.exception.ResourceNotFoundException;
 import com.codebasecartographer.api.repository.CodeChunkRepository;
 import com.codebasecartographer.api.repository.RepositoryRepository;
-
-import jakarta.transaction.Transactional;
+import com.codebasecartographer.api.service.GitHubFileService.GithubFile;
+import com.codebasecartographer.api.utils.FileUtils;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -19,131 +25,150 @@ public class IndexingService {
     private final RepositoryRepository repositoryRepository;
     private final CodeChunkRepository codeChunkRepository;
     private final RepoService repoService;
+    private final DragonflyQueueService dragonflyQueueService;
+    private final GitHubFileService gitHubFileService;
 
-    public IndexingService(RepositoryRepository repositoryRepository, CodeChunkRepository codeChunkRepository, RepoService repoService){
-        this.repositoryRepository = repositoryRepository; 
-        this.codeChunkRepository = codeChunkRepository;  
+    public IndexingService(RepositoryRepository repositoryRepository,
+            CodeChunkRepository codeChunkRepository,
+            RepoService repoService,
+            DragonflyQueueService dragonflyQueueService,
+            GitHubFileService gitHubFileService) {
+        this.repositoryRepository = repositoryRepository;
+        this.codeChunkRepository = codeChunkRepository;
         this.repoService = repoService;
+        this.dragonflyQueueService = dragonflyQueueService;
+        this.gitHubFileService = gitHubFileService;
     }
 
     // Called when user clicks "Index repo" on dashboard
-    // 1. Deletes old chunks if re-indexing
-    // 2. Sets status → INDEXING
-    // 3. Pushes job to SQS (TODO Week 3)
-    // Returns updated repo so frontend can navigate to progress page
-    @Transactional
-    public RepoResponse triggerIndexing(String repoId){
-        //Find the repo or else throw 404
-        Repository repo = repositoryRepository.findById(repoId)
-            .orElseThrow(() -> 
-                new ResourceNotFoundException("Repository", "id", repoId));
-
-        // If re-indexing — delete all old chunks first
-        // Fresh start, no duplicate chunks
-        long existingChunks = codeChunkRepository.countByRepository_Id(repoId);
-        if(existingChunks > 0){
-            codeChunkRepository.deleteByRepository_Id(repoId);
+    // 1. Optionally updates repo metadata (handles GitHub rename)
+    // 2. Prepares repo in DB (deletes old chunks, resets counters, sets INDEXING)
+    // 3. Transaction commits
+    // 4. THEN enqueues the job — worker never sees uncommitted state
+    public RepoResponse triggerIndexing(String repoId, String name, String fullName, String branch, String language) {
+        if (name != null || fullName != null || branch != null) {
+            repoService.updateRepoMetadata(repoId, name, fullName, branch, language);
         }
 
-        log.info("Triggering indexing for repo {} ({})", repoId, repo.getFullName());
+        repoService.prepareIndexing(repoId);
 
-        // Reset progress counters
-        repo.setIndexedFiles(0);
-        repo.setTotalFiles(0);
-        repo.setErrorMessage(null);
-        repo.setStatus(RepositoryStatus.INDEXING);
-        repositoryRepository.save(repo);
+        // Enqueue happens AFTER prepareIndexing transaction commits
+        // Worker will always see committed INDEXING status
+        dragonflyQueueService.enqueue(repoId);
+        log.info("Triggered indexing for repo {} — job enqueued", repoId);
 
-        // TODO Week 3 — push job to AWS SQS queue
-        // mqService.pushIndexingJob(repoId); //AWS sqs or redis or dragonfly
-
-        // Return updated repo — frontend uses this to navigate
-        return repoService.getRepoById(repo.getUser().getId(), repoId);
+        return repoService.getRepoById(
+                repositoryRepository.findById(repoId)
+                        .orElseThrow(() -> new ResourceNotFoundException("Repository", "id", repoId))
+                        .getUser().getId(),
+                repoId);
     }
 
-    // this will be called by frontend polling every 3 seconds on progress page
-    // Returns current status + file counts
-    public RepoResponse getIndexingStatus(String repoId){
+    // Polled by frontend every 3 seconds on progress page
+    public RepoResponse getIndexingStatus(String repoId) {
         Repository repo = repositoryRepository.findById(repoId)
-            .orElseThrow(() -> new ResourceNotFoundException("Repository", "id: ", repoId));
-        
+                .orElseThrow(() -> new ResourceNotFoundException("Repository", "id: ", repoId));
+
         return repoService.getRepoById(repo.getUser().getId(), repoId);
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // PART 2 — Scaffold Only (Week 3)
-    // These need SQS + GitHub API + Tree-sitter + Bedrock
-    // Structure defined now, logic added Week 3
-    // ═══════════════════════════════════════════════════════════════
-
-    // Called by SQS worker when it picks up a job from the queue
+    // Called by IndexingWorker when it picks up a job from the Dragonfly queue
     // Orchestrates the full indexing pipeline:
-    // fetchFiles → parseAST → embedChunks → saveToDB
+    // fetchFiles → parseChunks → saveChunks → generateEmbeddings → mark INDEXED
     @Transactional
     public void processIndexingJob(String repoId) {
-        // TODO Week 3:
-        // 1. Get repo from DB
-        // 2. Get user's GitHub access token
-        // 3. Call fetchRepoFiles()
-        // 4. Call parseAndChunkFiles()
-        // 5. Call generateAndSaveEmbeddings()
-        // 6. Update status → INDEXED
-        // On any failure → call handleIndexingFailure()
+        log.info("Starting indexing for repo: {}", repoId);
+
+        Repository repository = repositoryRepository.findById(repoId)
+                .orElseThrow(() -> new ResourceNotFoundException("Repository", "id", repoId));
+
+        String accessToken = repository.getUser().getAccessToken();
+
+        try {
+            log.info("Fetching files from GitHub for: {}", repository.getFullName());
+            List<GithubFile> files = gitHubFileService.fetchRepoFiles(repository, accessToken);
+
+            if (files.isEmpty()) {
+                repoService.setErrorMessage(
+                    repoId,
+                    "No supported files found."
+                );
+                log.warn("No supported files found for repo: {}", repository.getFullName());
+                return;
+            }
+            repoService.updateProgress(repoId, 0, files.size());
+            log.info("Found {} files to index", files.size());
+
+            // Build and save chunks in batches with progress updates
+            List<CodeChunk> chunks = new ArrayList<>();
+            int processed = 0;
+            for (GithubFile file : files) {
+                try {
+                    chunks.add(buildChunk(repository, file));
+                } catch (Exception e) {
+                    log.warn("Skipping file {}: {}", file.path(), e.getMessage());
+                }
+                processed++;
+
+                // Update progress every 5 files so the frontend sees smooth updates
+                if (processed % 5 == 0) {
+                    repoService.updateProgress(repoId, processed, files.size());
+                }
+
+                // Flush to DB every 50 files to keep memory bounded
+                if (processed % 50 == 0) {
+                    codeChunkRepository.saveAll(chunks);
+                    log.info("Saved batch of {} chunks for repo: {}", chunks.size(), repository.getFullName());
+                    chunks.clear();
+                }
+            }
+
+            // Flush remaining chunks
+            if (!chunks.isEmpty()) {
+                codeChunkRepository.saveAll(chunks);
+                log.info("Saved final batch of {} chunks for repo: {}", chunks.size(), repository.getFullName());
+            }
+
+            // Generate and save embeddings
+            generateAndSaveEmbeddings(repoId);
+
+            // Mark as INDEXED
+            repoService.updateProgress(repoId, files.size(), files.size());
+            repoService.updateStatus(repoId, RepositoryStatus.INDEXED);
+            log.info("Indexing complete for: {}", repository.getFullName());
+
+        } catch (Exception e) {
+            log.error("Indexing failed for repo: {}", repoId, e);
+            repoService.setErrorMessage(repoId, determineErrorMessage(e));
+        }
     }
 
-    // Calls GitHub Trees API to get all file paths + content
-    // Stores raw files in AWS S3
-    private void fetchRepoFiles(String repoId, String githubRepoId, String accessToken, String branch) {
-        // TODO Week 3:
-        // 1. Call GitHub API: GET /repos/:owner/:repo/git/trees?recursive=1
-        // 2. Filter by supported extensions (.java .ts .js .py .go)
-        // 3. Fetch file content for each path
-        // 4. Store in S3: s3://bucket/repoId/filePath
-        // 5. Update totalFiles count in DB
+    private CodeChunk buildChunk(Repository repo, GithubFile file) {
+        return CodeChunk.builder()
+                .repository(repo)
+                .filePath(file.path())
+                .chunkType(ChunkType.MODULE)
+                .chunkName(FileUtils.extractFileName(file.path()))
+                .content(file.content())
+                .startLine(1)
+                .endLine(countLines(file.content()))
+                .aiReferenceCount(0)
+                .build();
     }
 
-    // Uses Tree-sitter to parse each file into chunks
-    // Splits by function/class boundaries — not character count
-    private void parseAndChunkFiles(String repoId) {
-        // TODO Week 3:
-        // 1. Read files from S3
-        // 2. Detect language per file
-        // 3. Run Tree-sitter parser
-        // 4. Extract functions, classes, modules as chunks
-        // 5. Save chunks to code_chunks table (without embedding yet)
-        // 6. Update indexedFiles count in DB after each file
+    private int countLines(String content) {
+        if (content == null || content.isEmpty()) return 0;
+        return (int) content.lines().count();
     }
 
-    // Calls Amazon Bedrock Titan/Cohere to embed each chunk
-    // Saves vector to pgvector column in code_chunks
+    // TODO Week 3: Replace with Amazon Bedrock Titan/Cohere embeddings
+    // Fetch all chunks for this repo (no embedding yet), batch-call embeddings API,
+    // save VECTOR(1536) to embedding column
     private void generateAndSaveEmbeddings(String repoId) {
-        // TODO Week 3:
-        // 1. Fetch all chunks for this repo (no embedding yet)
-        // 2. Batch chunks in groups of 100
-        // 3. Call Bedrock Titan/Cohere embeddings API
-        // 4. Save VECTOR(1536) to embedding column
-        // 5. Update indexedFiles count as embeddings complete
+        log.info("Embeddings generation skipped — pending Bedrock integration");
     }
 
-    // Called when anything fails during indexing pipeline
-    // Updates repo status to FAILED with a reason
-    private void handleIndexingFailure(String repoId, Exception ex) {
-        // TODO Week 3:
-        // Determine what went wrong and set a user-friendly message
-        String message = determineErrorMessage(ex);
-        repoService.setErrorMessage(repoId, message);
-        // Status is set to FAILED inside setErrorMessage
-    }
-
-    // Converts raw Java exceptions to user-friendly messages
     private String determineErrorMessage(Exception ex) {
-        // TODO Week 3:
-        // Map common exceptions to readable messages:
-        // GitHub 403 → "Repository access denied. Check permissions."
-        // GitHub 429 → "GitHub rate limit hit. Try again in an hour."
-        // Timeout    → "Indexing timed out. Try a smaller repository."
-        // Default    → "Indexing failed. Please try again."
-        return "Indexing failed. Please try again.";
+        return "Indexing failed: " + ex.getMessage();
     }
 }
-

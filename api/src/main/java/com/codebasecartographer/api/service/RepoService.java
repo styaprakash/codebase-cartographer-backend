@@ -11,8 +11,8 @@ import com.codebasecartographer.api.dto.response.RepoResponse;
 import com.codebasecartographer.api.entity.Repository;
 import com.codebasecartographer.api.entity.User;
 import com.codebasecartographer.api.enums.RepositoryStatus;
-import com.codebasecartographer.api.exception.DuplicateResourceException;
 import com.codebasecartographer.api.exception.ResourceNotFoundException;
+import com.codebasecartographer.api.repository.CodeChunkRepository;
 import com.codebasecartographer.api.repository.RepositoryRepository;
 import com.codebasecartographer.api.repository.UserRepository;
 
@@ -24,11 +24,13 @@ public class RepoService {
     // We need RepositoryRepository to talk to the database
     private final RepositoryRepository repositoryRepository;
     private final UserRepository userRepository;
+    private final CodeChunkRepository codeChunkRepository;
 
     // Constructor injection
-    public RepoService(RepositoryRepository repositoryRepository, UserRepository userRepository){
+    public RepoService(RepositoryRepository repositoryRepository, UserRepository userRepository, CodeChunkRepository codeChunkRepository){
         this.repositoryRepository = repositoryRepository;
         this.userRepository = userRepository;
+        this.codeChunkRepository = codeChunkRepository;
     }
 
     // get all repos for a user
@@ -55,14 +57,22 @@ public class RepoService {
 
 
     // import a repo — called when user clicks "Index repo"
+    // Upsert: if repo already exists for this user, update metadata; otherwise create new
     public RepoResponse createRepo(String userId, String githubRepoId, String name, String fullName, String branch, String language){
-        //first check if the this repo already exists for this user
-        Boolean exists = repositoryRepository.existsByUserIdAndGithubRepoId(userId, githubRepoId);
+        // Check if this repo already exists for this user
+        var existing = repositoryRepository.findByUserIdAndGithubRepoId(userId, githubRepoId);
 
-        if(exists){
-            log.warn("Duplicate repository import attempt: {}", fullName);
-            throw new DuplicateResourceException("Repository", fullName);
+        if(existing.isPresent()){
+            log.info("Repo already exists — updating metadata: {}", fullName);
+            Repository repo = existing.get();
+            repo.setName(name);
+            repo.setFullName(fullName);
+            repo.setBranch(branch);
+            repo.setLanguage(language);
+            Repository saved = repositoryRepository.save(repo);
+            return repoResponse(saved);
         }
+
         // Find the user first (you need the User object for the FK)
         User user = userRepository.findById(userId)
             .orElseThrow( () -> {
@@ -89,6 +99,19 @@ public class RepoService {
         //convert the new repo entity to dto then return
         return repoResponse(saved);
 
+    }
+
+    // update metadata (name, fullName, branch, language) — used on re-index after rename
+    @Transactional
+    public void updateRepoMetadata(String repoId, String name, String fullName, String branch, String language){
+        Repository repo = repositoryRepository.findById(repoId)
+            .orElseThrow(() -> new ResourceNotFoundException("Repository", "id", repoId));
+        repo.setName(name);
+        repo.setFullName(fullName);
+        repo.setBranch(branch);
+        if(language != null) repo.setLanguage(language);
+        repositoryRepository.save(repo);
+        log.info("Updated metadata for repo {}: {}", repoId, fullName);
     }
 
     //update status : Called by indexing worker: PENDING → INDEXING → INDEXED/FAILED
@@ -120,6 +143,24 @@ public class RepoService {
         repositoryRepository.save(repo);
     }
 
+    @Transactional
+    protected void prepareIndexing(String repoId) {
+        Repository repo = repositoryRepository.findById(repoId)
+                .orElseThrow(() -> new ResourceNotFoundException("Repository", "id", repoId));
+
+        long existingChunks = codeChunkRepository.countByRepository_Id(repoId);
+        if (existingChunks > 0) {
+            codeChunkRepository.deleteByRepository_Id(repoId);
+        }
+
+        repo.setIndexedFiles(0);
+        repo.setTotalFiles(0);
+        repo.setErrorMessage(null);
+        repo.setStatus(RepositoryStatus.INDEXING);
+        repositoryRepository.save(repo);
+    }
+
+
     // setErrorMessage: Called when indexing fails — stores why it failed
     @Transactional
     public void setErrorMessage(String repoId, String errorMessage){
@@ -137,6 +178,7 @@ public class RepoService {
             return RepoResponse.builder()
                 .id(repo.getId())
                 .userId(repo.getUser().getId())
+                .githubRepoId(repo.getGithubRepoId())
                 .name(repo.getName())
                 .fullName(repo.getFullName())
                 .branch(repo.getBranch())

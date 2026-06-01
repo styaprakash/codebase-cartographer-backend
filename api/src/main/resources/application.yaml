@@ -21,6 +21,10 @@ spring:
   mvc:
     problemdetails:
       enabled: true
+  data:
+    redis:
+      host: localhost
+      port: 6380
 
 allowed:
   origins: "http://localhost:3000"
