@@ -1,5 +1,8 @@
 package com.codebasecartographer.api.controller;
+
 import java.util.List;
+
+import lombok.extern.slf4j.Slf4j;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -15,9 +18,11 @@ import com.codebasecartographer.api.dto.request.ReindexRequest;
 import com.codebasecartographer.api.dto.response.RepoResponse;
 import com.codebasecartographer.api.service.IndexingService;
 import com.codebasecartographer.api.service.RepoService;
+import com.codebasecartographer.api.service.embeddingServices.EmbeddingService;
 
 import jakarta.validation.Valid;
 
+@Slf4j
 @RestController
 @RequestMapping("/api")
 public class RepoController extends BaseController {
@@ -25,10 +30,17 @@ public class RepoController extends BaseController {
     private final RepoService repoService;
     private final IndexingService indexingService;
 
+    //Embedding service
+    private final EmbeddingService embeddingService;
+
     //Constructor injection
-    public RepoController(RepoService repoService, IndexingService indexingService){
+    public RepoController(RepoService repoService, 
+                    IndexingService indexingService,
+                    EmbeddingService embeddingService)
+    {
         this.repoService = repoService;
         this.indexingService = indexingService;
+        this.embeddingService = embeddingService;
     }
 
     // GET  /api/repos
@@ -73,6 +85,7 @@ public class RepoController extends BaseController {
         @PathVariable("id") String id,
         @RequestBody(required = false) ReindexRequest metadata
     ){
+        log.info("Retry request repoId={}, metadata={}", id, metadata);
         String userId = getCurrentUserId();
         String name = metadata != null ? metadata.getName() : null;
         String fullName = metadata != null ? metadata.getFullName() : null;
@@ -87,6 +100,16 @@ public class RepoController extends BaseController {
         @PathVariable("id") String id
     ){
         String userId = getCurrentUserId();
-        return indexingService.getIndexingStatus(id);
+        return indexingService.getIndexingStatus(userId, id);
+    }
+
+    //Temporary Endpoint to test
+    @GetMapping("repos/test-embedding")
+    public String testEmbedding() {
+
+        float[] embedding =
+                embeddingService.embed("How authentication works");
+
+        return "Embedding size = " + embedding.length;
     }
 }

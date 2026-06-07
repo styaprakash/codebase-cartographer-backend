@@ -89,7 +89,7 @@ public class RepoService {
             .fullName(fullName)
             .branch(branch)
             .language(language)
-            .status(RepositoryStatus.PENDING) // always starts as PENDING
+            .status(RepositoryStatus.NOT_INDEXED)
             .totalFiles(0)
             .indexedFiles(0)
             .build();
@@ -102,16 +102,21 @@ public class RepoService {
     }
 
     // update metadata (name, fullName, branch, language) — used on re-index after rename
+    // PATCH semantics: only overwrite a field when the incoming value is non-null
     @Transactional
     public void updateRepoMetadata(String repoId, String name, String fullName, String branch, String language){
         Repository repo = repositoryRepository.findById(repoId)
             .orElseThrow(() -> new ResourceNotFoundException("Repository", "id", repoId));
-        repo.setName(name);
-        repo.setFullName(fullName);
-        repo.setBranch(branch);
-        if(language != null) repo.setLanguage(language);
+
+        log.info("Metadata received name={}, fullName={}, branch={}, language={}",
+                name, fullName, branch, language);
+
+        if (name != null) repo.setName(name);
+        if (fullName != null) repo.setFullName(fullName);
+        if (branch != null) repo.setBranch(branch);
+        if (language != null) repo.setLanguage(language);
         repositoryRepository.save(repo);
-        log.info("Updated metadata for repo {}: {}", repoId, fullName);
+        log.info("Updated metadata for repo {}: {}", repoId, repo.getFullName());
     }
 
     //update status : Called by indexing worker: PENDING → INDEXING → INDEXED/FAILED
@@ -129,6 +134,7 @@ public class RepoService {
         }
 
         repositoryRepository.save(repo);
+        log.info("Repo {} -> {}", repoId, status);
     }
 
     // updateProgress: Called during indexing — frontend polls for progress bar update
@@ -144,19 +150,19 @@ public class RepoService {
     }
 
     @Transactional
-    protected void prepareIndexing(String repoId) {
+    public void prepareIndexing(String repoId) {
         Repository repo = repositoryRepository.findById(repoId)
                 .orElseThrow(() -> new ResourceNotFoundException("Repository", "id", repoId));
 
         long existingChunks = codeChunkRepository.countByRepository_Id(repoId);
         if (existingChunks > 0) {
-            codeChunkRepository.deleteByRepository_Id(repoId);
+            codeChunkRepository.deleteChunksByRepoId(repoId);
         }
 
         repo.setIndexedFiles(0);
         repo.setTotalFiles(0);
         repo.setErrorMessage(null);
-        repo.setStatus(RepositoryStatus.INDEXING);
+        repo.setStatus(RepositoryStatus.PENDING);
         repositoryRepository.save(repo);
     }
 

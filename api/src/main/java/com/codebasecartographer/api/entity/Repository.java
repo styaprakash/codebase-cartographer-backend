@@ -93,7 +93,7 @@ public class Repository {
     protected void onCreate() {
         createdAt = LocalDateTime.now();
         if (status == null) {
-            status = RepositoryStatus.PENDING; // default status on creation
+            status = RepositoryStatus.NOT_INDEXED;
         }
     }
 }

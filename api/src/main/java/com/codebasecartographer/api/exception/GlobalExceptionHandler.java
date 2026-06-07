@@ -83,6 +83,20 @@ public class GlobalExceptionHandler {
         return problem;
     }
 
+    // 409 Conflict — e.g. duplicate indexing request
+    @ExceptionHandler(ConflictException.class)
+    public ProblemDetail handleConflict(ConflictException ex){
+        log.warn("Conflict: {}", ex.getMessage());
+        ProblemDetail problem = ProblemDetail
+            .forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+
+        problem.setTitle("Conflict");
+        problem.setType(URI.create("https://codebasecartographer.com/errors/conflict"));
+        problem.setProperty("timestamp", LocalDateTime.now());
+
+        return problem;
+    }
+
     // Handle duplicate resource errors specifically
     @ExceptionHandler(com.codebasecartographer.api.exception.DuplicateResourceException.class)
     public ProblemDetail handleDuplicate(com.codebasecartographer.api.exception.DuplicateResourceException ex){

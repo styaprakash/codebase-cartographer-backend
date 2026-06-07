@@ -2,8 +2,13 @@ package com.codebasecartographer.api.worker;
 
 import org.springframework.stereotype.Component;
 
+import com.codebasecartographer.api.enums.RepositoryStatus;
+import com.codebasecartographer.api.repository.CodeChunkRepository;
+import com.codebasecartographer.api.repository.RepositoryRepository;
 import com.codebasecartographer.api.service.DragonflyQueueService;
 import com.codebasecartographer.api.service.IndexingService;
+import com.codebasecartographer.api.service.RepoService;
+import com.codebasecartographer.api.entity.Repository;
 
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
@@ -13,12 +18,21 @@ import lombok.extern.slf4j.Slf4j;
 public class IndexingWorker {
     private final DragonflyQueueService dragonflyQueueService;
     private final IndexingService indexingService;
+    private final RepoService repoService;
+    private final RepositoryRepository repositoryRepository;
+    private final CodeChunkRepository codeChunkRepository;
 
     // constructor injection
-    public IndexingWorker(DragonflyQueueService dragonflyQueueService, 
-                        IndexingService indexingService) {
+    public IndexingWorker(DragonflyQueueService dragonflyQueueService,
+            IndexingService indexingService,
+            RepoService repoService,
+            RepositoryRepository repositoryRepository,
+            CodeChunkRepository codeChunkRepository) {
         this.dragonflyQueueService = dragonflyQueueService;
         this.indexingService = indexingService;
+        this.repoService = repoService;
+        this.repositoryRepository = repositoryRepository;
+        this.codeChunkRepository = codeChunkRepository;
     }
 
     // Run this method automatically AFTER Spring creates the bean. Worker
@@ -33,8 +47,56 @@ public class IndexingWorker {
                     String repoId = dragonflyQueueService.dequeue(); // rightPop() internally
                     // dequeue() blocks for 2s if empty — no sleep needed
                     if (repoId != null) {
-                        log.info("Processing indexing job for repo: {}", repoId);
-                        indexingService.processIndexingJob(repoId);
+                        log.info("Repo {} -> INDEXING", repoId);
+                        repoService.updateStatus(repoId, RepositoryStatus.INDEXING);
+
+                        Repository repo = repositoryRepository.findById(repoId).orElse(null);
+
+                        long total = codeChunkRepository.countByRepository_Id(repoId);
+
+                        long embedded = codeChunkRepository.countByRepository_IdAndEmbeddingIsNotNull(repoId);
+
+                        // This is for self healing from failed embeddings
+                        if (total > 0 && embedded < total) {
+
+                            log.warn(
+                                    "Repo {} has missing embeddings. total={}, embedded={}",
+                                    repoId,
+                                    total,
+                                    embedded);
+
+                            indexingService.generateMissingEmbeddings(repoId);
+
+                            long totalAfter = codeChunkRepository.countByRepository_Id(repoId);
+
+                            long embeddedAfter = codeChunkRepository.countByRepository_IdAndEmbeddingIsNotNull(repoId);
+
+                            if (totalAfter == embeddedAfter) {
+
+                                repoService.updateStatus(
+                                        repoId,
+                                        RepositoryStatus.INDEXED);
+
+                                log.info(
+                                        "Repo {} successfully repaired. {} / {} embeddings present.",
+                                        repoId,
+                                        embeddedAfter,
+                                        totalAfter);
+
+                            } else {
+
+                                log.warn(
+                                        "Repo {} repair incomplete. {} / {} embeddings present.",
+                                        repoId,
+                                        embeddedAfter,
+                                        totalAfter);
+                            }
+
+                        } else {
+
+                            indexingService.processIndexingJob(repoId);
+                        }
+
                     }
                 } catch (Exception ex) {
                     log.error("Worker error", ex);
