@@ -19,6 +19,9 @@ import com.codebasecartographer.api.repository.CodeChunkRepository;
 import com.codebasecartographer.api.repository.QueryLogRepository;
 import com.codebasecartographer.api.repository.RepositoryRepository;
 import com.codebasecartographer.api.repository.UserRepository;
+import com.codebasecartographer.api.enums.EmbeddingModel;
+import com.codebasecartographer.api.service.embeddingServices.factory.EmbeddingProviderFactory;
+import com.codebasecartographer.api.service.embeddingServices.providers.EmbeddingProvider;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -30,14 +33,16 @@ public class QueryService {
     private final QueryLogRepository queryLogRepository;
     private final UserRepository userRepository;
     private final UserService userService;
+    private final EmbeddingProviderFactory providerFactory;
 
     //Constructor injection
-    public QueryService(RepositoryRepository repositoryRepository, CodeChunkRepository codeChunkRepository, QueryLogRepository queryLogRepository, UserRepository userRepository, UserService userService){
+    public QueryService(RepositoryRepository repositoryRepository, CodeChunkRepository codeChunkRepository, QueryLogRepository queryLogRepository, UserRepository userRepository, UserService userService, EmbeddingProviderFactory providerFactory){
         this.repositoryRepository = repositoryRepository; 
         this.codeChunkRepository = codeChunkRepository;  
         this.queryLogRepository = queryLogRepository;
         this.userRepository = userRepository;
         this.userService = userService;
+        this.providerFactory = providerFactory;
     }
 
     // ── Main Query Method ─────────────────────────────────────────
@@ -64,12 +69,20 @@ public class QueryService {
         // String cachedAnswer = dragonFlyService.getCachedAnswer(repoId, question)
         // if (cachedAnswer != null) return toResponse(cachedAnswer, ...)
 
-        // Step 5 — TODO Week 5: Embed the question via Bedrock
-        // float[] questionVector = embeddingService.embed(question)
+        EmbeddingModel model = repo.getEmbeddingModel();
+        if (model == null) {
+            throw new BadRequestException(
+                    "Repository has no embedding model assigned. Please re-index.");
+        }
+
+        EmbeddingProvider provider = providerFactory.getProvider(model);
+
+        // Step 5 — Embed the question using the SAME model as indexing
+        // float[] questionVector = provider.embed(question);
 
         // Step 6 — TODO Week 5: Vector search via pgvector
         // List<CodeChunk> relevantChunks = codeChunkRepository
-        //     .findTopSimilarChunks(repoId, questionVector, 10)
+        //     .findTopSimilarChunks(repoId, questionVector, 10);
 
         // Step 7 — TODO Week 5: Agentic RAG loop via LangChain4j
         // String answer = agentService.runReActLoop(question, relevantChunks)

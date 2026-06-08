@@ -18,7 +18,6 @@ import com.codebasecartographer.api.dto.request.ReindexRequest;
 import com.codebasecartographer.api.dto.response.RepoResponse;
 import com.codebasecartographer.api.service.IndexingService;
 import com.codebasecartographer.api.service.RepoService;
-import com.codebasecartographer.api.service.embeddingServices.EmbeddingService;
 
 import jakarta.validation.Valid;
 
@@ -30,17 +29,11 @@ public class RepoController extends BaseController {
     private final RepoService repoService;
     private final IndexingService indexingService;
 
-    //Embedding service
-    private final EmbeddingService embeddingService;
-
-    //Constructor injection
     public RepoController(RepoService repoService, 
-                    IndexingService indexingService,
-                    EmbeddingService embeddingService)
+                    IndexingService indexingService)
     {
         this.repoService = repoService;
         this.indexingService = indexingService;
-        this.embeddingService = embeddingService;
     }
 
     // GET  /api/repos
@@ -103,13 +96,4 @@ public class RepoController extends BaseController {
         return indexingService.getIndexingStatus(userId, id);
     }
 
-    //Temporary Endpoint to test
-    @GetMapping("repos/test-embedding")
-    public String testEmbedding() {
-
-        float[] embedding =
-                embeddingService.embed("How authentication works");
-
-        return "Embedding size = " + embedding.length;
-    }
 }

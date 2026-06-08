@@ -21,6 +21,7 @@ public class RepoResponse {
     private String fullName;
     private String branch;
     private String language;
+    private com.codebasecartographer.api.enums.EmbeddingModel embeddingModel;
     private RepositoryStatus status;
     private Integer totalFiles;
     private Integer indexedFiles;

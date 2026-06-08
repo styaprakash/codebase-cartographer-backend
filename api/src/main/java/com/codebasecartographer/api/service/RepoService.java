@@ -189,6 +189,7 @@ public class RepoService {
                 .fullName(repo.getFullName())
                 .branch(repo.getBranch())
                 .language(repo.getLanguage())
+                .embeddingModel(repo.getEmbeddingModel())
                 .status(repo.getStatus())
                 .totalFiles(repo.getTotalFiles())
                 .indexedFiles(repo.getIndexedFiles())

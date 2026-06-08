@@ -16,7 +16,10 @@ import com.codebasecartographer.api.exception.ResourceNotFoundException;
 import com.codebasecartographer.api.repository.CodeChunkRepository;
 import com.codebasecartographer.api.repository.RepositoryRepository;
 import com.codebasecartographer.api.service.GitHubFileService.GithubFile;
-import com.codebasecartographer.api.service.embeddingServices.EmbeddingService;
+import com.codebasecartographer.api.service.embeddingServices.EmbeddingModelSelector;
+import com.codebasecartographer.api.service.embeddingServices.EmbeddingProviderMetrics;
+import com.codebasecartographer.api.service.embeddingServices.factory.EmbeddingProviderFactory;
+import com.codebasecartographer.api.service.embeddingServices.providers.EmbeddingProvider;
 import com.codebasecartographer.api.utils.FileUtils;
 
 import lombok.extern.slf4j.Slf4j;
@@ -29,20 +32,26 @@ public class IndexingService {
     private final RepoService repoService;
     private final DragonflyQueueService dragonflyQueueService;
     private final GitHubFileService gitHubFileService;
-    private final EmbeddingService embeddingService;
+    private final EmbeddingProviderFactory providerFactory;
+    private final EmbeddingModelSelector modelSelector;
+    private final EmbeddingProviderMetrics providerMetrics;
 
     public IndexingService(RepositoryRepository repositoryRepository,
             CodeChunkRepository codeChunkRepository,
             RepoService repoService,
             DragonflyQueueService dragonflyQueueService,
             GitHubFileService gitHubFileService,
-            EmbeddingService embeddingService) {
+            EmbeddingProviderFactory providerFactory,
+            EmbeddingModelSelector modelSelector,
+            EmbeddingProviderMetrics providerMetrics) {
         this.repositoryRepository = repositoryRepository;
         this.codeChunkRepository = codeChunkRepository;
         this.repoService = repoService;
         this.dragonflyQueueService = dragonflyQueueService;
         this.gitHubFileService = gitHubFileService;
-        this.embeddingService = embeddingService;
+        this.providerFactory = providerFactory;
+        this.modelSelector = modelSelector;
+        this.providerMetrics = providerMetrics;
     }
 
     // Called when user clicks "Index repo" on dashboard
@@ -91,6 +100,13 @@ public class IndexingService {
 
         Repository repository = repositoryRepository.findById(repoId)
                 .orElseThrow(() -> new ResourceNotFoundException("Repository", "id", repoId));
+
+        if (repository.getEmbeddingModel() == null) {
+            com.codebasecartographer.api.enums.EmbeddingModel selected = modelSelector.selectModel();
+            repository.setEmbeddingModel(selected);
+            repositoryRepository.save(repository);
+            log.info("Assigned embedding model {} to repo {}", selected, repoId);
+        }
 
         String accessToken = repository.getUser().getAccessToken();
 
@@ -178,6 +194,13 @@ public class IndexingService {
     // Fetch all chunks for this repo (no embedding yet), batch-call embeddings API,
     // save VECTOR(1536) to embedding column
     private void generateAndSaveEmbeddings(String repoId) {
+        Repository repo = repositoryRepository.findById(repoId)
+                .orElseThrow(() -> new ResourceNotFoundException("Repository", "id", repoId));
+
+        EmbeddingProvider provider = providerFactory.getProvider(repo.getEmbeddingModel());
+        log.info("Using embedding model: {}", provider.getModel().getModelTag());
+        log.info("Embedding dimension: {}", provider.getModel().getDimension());
+
         List<CodeChunk> chunks = codeChunkRepository.findByRepository_Id(repoId);
         log.info("Generating embeddings for {} chunks", chunks.size());
 
@@ -192,8 +215,15 @@ public class IndexingService {
             }
 
             try {
-                // Generate vector via Ollama
-                float[] embedding = embeddingService.embed(chunk.getContent());
+                providerMetrics.getOrCreate(repo.getEmbeddingModel()).markActive();
+                long start = System.currentTimeMillis();
+
+                // Generate vector
+                float[] embedding = provider.embed(chunk.getContent());
+
+                long latency = System.currentTimeMillis() - start;
+                providerMetrics.recordSuccess(repo.getEmbeddingModel(), latency);
+
                 chunk.setEmbedding(embedding);
 
                 batch.add(chunk);
@@ -205,6 +235,7 @@ public class IndexingService {
                     batch.clear();
                 }
             } catch (Exception e) {
+                providerMetrics.recordFailure(repo.getEmbeddingModel());
                 log.error(
                         "Embedding failed for chunk {}",
                         chunk.getId(),
@@ -218,11 +249,14 @@ public class IndexingService {
 
             log.info("Saved final batch of {}", batch.size());
         }
-        codeChunkRepository.saveAll(chunks);
     }
 
     @Transactional
     public void generateMissingEmbeddings(String repoId) {
+        Repository repo = repositoryRepository.findById(repoId)
+                .orElseThrow(() -> new ResourceNotFoundException("Repository", "id", repoId));
+        EmbeddingProvider provider = providerFactory.getProvider(repo.getEmbeddingModel());
+
         List<CodeChunk> chunks = codeChunkRepository.findByRepository_IdAndEmbeddingIsNull(repoId);
 
         log.info("Generating embeddings for {} chunks", chunks.size());
@@ -237,10 +271,17 @@ public class IndexingService {
 
         for (CodeChunk chunk : chunks) {
             try {
-                float[] embedding = embeddingService.embed(chunk.getContent());
+                providerMetrics.getOrCreate(repo.getEmbeddingModel()).markActive();
+                long start = System.currentTimeMillis();
+
+                float[] embedding = provider.embed(chunk.getContent());
+
+                long latency = System.currentTimeMillis() - start;
+                providerMetrics.recordSuccess(repo.getEmbeddingModel(), latency);
 
                 chunk.setEmbedding(embedding);
             } catch (Exception e) {
+                providerMetrics.recordFailure(repo.getEmbeddingModel());
                 log.error("Failed embedding chunk {}", chunk.getId(), e);
             }
         }

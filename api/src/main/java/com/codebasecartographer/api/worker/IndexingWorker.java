@@ -65,6 +65,12 @@ public class IndexingWorker {
                                     total,
                                     embedded);
 
+                            if (repo != null && repo.getEmbeddingModel() == null) {
+                                log.error("Repo {} has chunks but no embedding model assigned. Skipping self-heal.", repoId);
+                                repoService.setErrorMessage(repoId, "Cannot self-heal: no embedding model assigned");
+                                continue;
+                            }
+
                             indexingService.generateMissingEmbeddings(repoId);
 
                             long totalAfter = codeChunkRepository.countByRepository_Id(repoId);

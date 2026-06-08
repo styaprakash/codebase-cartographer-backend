@@ -37,4 +37,18 @@ public interface CodeChunkRepository extends JpaRepository<CodeChunk, String> {
     long countByRepository_IdAndEmbeddingIsNotNull(String repositoryId);
 
     long countByRepository_IdAndEmbeddingIsNull(String repositoryId);
+
+    // pgvector cosine similarity search — scoped to one repo
+    // The <=> operator is pgvector's cosine distance
+    @Query(value = """
+        SELECT * FROM code_chunks
+        WHERE repo_id = :repoId
+          AND embedding IS NOT NULL
+        ORDER BY embedding <=> CAST(:queryVector AS vector)
+        LIMIT :limit
+        """, nativeQuery = true)
+    List<CodeChunk> findTopSimilarChunks(
+        @Param("repoId") String repoId,
+        @Param("queryVector") String queryVector,
+        @Param("limit") int limit);
 }
