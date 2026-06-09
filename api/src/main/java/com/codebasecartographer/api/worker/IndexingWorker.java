@@ -1,5 +1,8 @@
 package com.codebasecartographer.api.worker;
 
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
 import org.springframework.stereotype.Component;
 
 import com.codebasecartographer.api.enums.RepositoryStatus;
@@ -39,6 +42,7 @@ public class IndexingWorker {
     // auto-starts when backend boots.
     @PostConstruct
     public void startWorker() {
+        ExecutorService executor = Executors.newFixedThreadPool(10);
         Thread workerThread = new Thread(() -> {
             log.info("Indexing Worker started...");
             // Keep checking queue forever
@@ -47,62 +51,58 @@ public class IndexingWorker {
                     String repoId = dragonflyQueueService.dequeue(); // rightPop() internally
                     // dequeue() blocks for 2s if empty — no sleep needed
                     if (repoId != null) {
-                        log.info("Repo {} -> INDEXING", repoId);
-                        repoService.updateStatus(repoId, RepositoryStatus.INDEXING);
+                        executor.submit(() -> {
+                            log.info("Repo {} -> INDEXING", repoId);
+                            repoService.updateStatus(repoId, RepositoryStatus.INDEXING);
 
-                        Repository repo = repositoryRepository.findById(repoId).orElse(null);
+                            Repository repo = repositoryRepository.findById(repoId).orElse(null);
 
-                        long total = codeChunkRepository.countByRepository_Id(repoId);
+                            long total = codeChunkRepository.countByRepository_Id(repoId);
 
-                        long embedded = codeChunkRepository.countByRepository_IdAndEmbeddingIsNotNull(repoId);
+                            long embedded = codeChunkRepository.countByRepository_IdAndEmbeddingIsNotNull(repoId);
 
-                        // This is for self healing from failed embeddings
-                        if (total > 0 && embedded < total) {
-
-                            log.warn(
-                                    "Repo {} has missing embeddings. total={}, embedded={}",
-                                    repoId,
-                                    total,
-                                    embedded);
-
-                            if (repo != null && repo.getEmbeddingModel() == null) {
-                                log.error("Repo {} has chunks but no embedding model assigned. Skipping self-heal.", repoId);
-                                repoService.setErrorMessage(repoId, "Cannot self-heal: no embedding model assigned");
-                                continue;
-                            }
-
-                            indexingService.generateMissingEmbeddings(repoId);
-
-                            long totalAfter = codeChunkRepository.countByRepository_Id(repoId);
-
-                            long embeddedAfter = codeChunkRepository.countByRepository_IdAndEmbeddingIsNotNull(repoId);
-
-                            if (totalAfter == embeddedAfter) {
-
-                                repoService.updateStatus(
-                                        repoId,
-                                        RepositoryStatus.INDEXED);
-
-                                log.info(
-                                        "Repo {} successfully repaired. {} / {} embeddings present.",
-                                        repoId,
-                                        embeddedAfter,
-                                        totalAfter);
-
-                            } else {
-
+                            // This is for self healing from failed embeddings
+                            if (total > 0 && embedded < total) {
                                 log.warn(
-                                        "Repo {} repair incomplete. {} / {} embeddings present.",
+                                        "Repo {} has missing embeddings. total={}, embedded={}",
                                         repoId,
-                                        embeddedAfter,
-                                        totalAfter);
+                                        total,
+                                        embedded);
+                                if (repo != null && repo.getEmbeddingModel() == null) {
+                                    log.error("Repo {} has chunks but no embedding model assigned. Skipping self-heal.",
+                                            repoId);
+                                    repoService.setErrorMessage(repoId,
+                                            "Cannot self-heal: no embedding model assigned");
+                                    return;
+                                }
+
+                                indexingService.generateMissingEmbeddings(repoId);
+
+                                long totalAfter = codeChunkRepository.countByRepository_Id(repoId);
+
+                                long embeddedAfter = codeChunkRepository
+                                        .countByRepository_IdAndEmbeddingIsNotNull(repoId);
+
+                                if (totalAfter == embeddedAfter) {
+                                    repoService.updateStatus(
+                                            repoId,
+                                            RepositoryStatus.INDEXED);
+                                    log.info(
+                                            "Repo {} successfully repaired. {} / {} embeddings present.",
+                                            repoId,
+                                            embeddedAfter,
+                                            totalAfter);
+                                } else {
+                                    log.warn(
+                                            "Repo {} repair incomplete. {} / {} embeddings present.",
+                                            repoId,
+                                            embeddedAfter,
+                                            totalAfter);
+                                }
+                            } else {
+                                indexingService.processIndexingJob(repoId);
                             }
-
-                        } else {
-
-                            indexingService.processIndexingJob(repoId);
-                        }
-
+                        });
                     }
                 } catch (Exception ex) {
                     log.error("Worker error", ex);

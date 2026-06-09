@@ -35,6 +35,9 @@ public class IndexingService {
     private final EmbeddingProviderFactory providerFactory;
     private final EmbeddingModelSelector modelSelector;
     private final EmbeddingProviderMetrics providerMetrics;
+    private final com.codebasecartographer.api.controller.IndexingSSEController sseController;
+
+    private static final int EMBEDDING_BATCH_SIZE = 20; // Adjust based on Ollama's limits
 
     public IndexingService(RepositoryRepository repositoryRepository,
             CodeChunkRepository codeChunkRepository,
@@ -43,7 +46,8 @@ public class IndexingService {
             GitHubFileService gitHubFileService,
             EmbeddingProviderFactory providerFactory,
             EmbeddingModelSelector modelSelector,
-            EmbeddingProviderMetrics providerMetrics) {
+            EmbeddingProviderMetrics providerMetrics,
+            com.codebasecartographer.api.controller.IndexingSSEController sseController) {
         this.repositoryRepository = repositoryRepository;
         this.codeChunkRepository = codeChunkRepository;
         this.repoService = repoService;
@@ -52,6 +56,7 @@ public class IndexingService {
         this.providerFactory = providerFactory;
         this.modelSelector = modelSelector;
         this.providerMetrics = providerMetrics;
+        this.sseController = sseController;
     }
 
     // Called when user clicks "Index repo" on dashboard
@@ -94,7 +99,6 @@ public class IndexingService {
     // Called by IndexingWorker when it picks up a job from the Dragonfly queue
     // Orchestrates the full indexing pipeline:
     // fetchFiles → parseChunks → saveChunks → generateEmbeddings → mark INDEXED
-    @Transactional
     public void processIndexingJob(String repoId) {
         log.info("Starting indexing for repo: {}", repoId);
 
@@ -121,7 +125,6 @@ public class IndexingService {
                 log.warn("No supported files found for repo: {}", repository.getFullName());
                 return;
             }
-            repoService.updateProgress(repoId, 0, files.size());
             log.info("Found {} files to index", files.size());
 
             // Build and save chunks in batches with progress updates
@@ -135,36 +138,47 @@ public class IndexingService {
                 }
                 processed++;
 
-                // Update progress every 5 files so the frontend sees smooth updates
-                if (processed % 5 == 0) {
-                    repoService.updateProgress(repoId, processed, files.size());
-                }
+                // Flush to DB every 500 files WITH embeddings generated
+                if (processed % 500 == 0) {
+                    generateAndSaveEmbeddingsForBatch(repoId, chunks);
 
-                // Flush to DB every 50 files to keep memory bounded
-                if (processed % 50 == 0) {
-                    codeChunkRepository.saveAll(chunks);
-                    log.info("Saved batch of {} chunks for repo: {}", chunks.size(), repository.getFullName());
+                    // Send SSE events
+                    for (int i = 0; i < chunks.size(); i++) {
+                        int currentCount = processed - chunks.size() + i + 1;
+                        sseController.sendFileCompleted(repoId, chunks.get(i).getFilePath(), currentCount);
+                    }
+                    int percentage = (int) (((double) processed / files.size()) * 100);
+                    sseController.sendProgress(repoId, processed, files.size(), percentage, file.path());
+
+                    log.info("Saved batch of {} chunks with embeddings for repo: {}", chunks.size(),
+                            repository.getFullName());
                     chunks.clear();
                 }
             }
 
             // Flush remaining chunks
             if (!chunks.isEmpty()) {
-                codeChunkRepository.saveAll(chunks);
+                generateAndSaveEmbeddingsForBatch(repoId, chunks);
+
+                for (int i = 0; i < chunks.size(); i++) {
+                    int currentCount = processed - chunks.size() + i + 1;
+                    sseController.sendFileCompleted(repoId, chunks.get(i).getFilePath(), currentCount);
+                }
+                sseController.sendProgress(repoId, processed, files.size(), 100, chunks.get(chunks.size() - 1).getFilePath());
+
                 log.info("Saved final batch of {} chunks for repo: {}", chunks.size(), repository.getFullName());
             }
 
-            // Generate and save embeddings
-            generateAndSaveEmbeddings(repoId);
-
             // Mark as INDEXED
-            repoService.updateProgress(repoId, files.size(), files.size());
             repoService.updateStatus(repoId, RepositoryStatus.INDEXED);
+            sseController.sendStatus(repoId, RepositoryStatus.INDEXED, null);
             log.info("Indexing complete for: {}", repository.getFullName());
 
         } catch (Exception e) {
             log.error("Indexing failed for repo: {}", repoId, e);
-            repoService.setErrorMessage(repoId, determineErrorMessage(e));
+            String errorMessage = determineErrorMessage(e);
+            repoService.setErrorMessage(repoId, errorMessage);
+            sseController.sendStatus(repoId, RepositoryStatus.FAILED, errorMessage);
         }
     }
 
@@ -187,13 +201,9 @@ public class IndexingService {
         return (int) content.lines().count();
     }
 
-    // Number of embeddings persisted per DB batch
-    private static final int EMBEDDING_BATCH_SIZE = 25;
-
-    // TODO Week 3: Replace with Amazon Bedrock Titan/Cohere embeddings
     // Fetch all chunks for this repo (no embedding yet), batch-call embeddings API,
     // save VECTOR(1536) to embedding column
-    private void generateAndSaveEmbeddings(String repoId) {
+    private void generateAndSaveEmbeddingsForBatch(String repoId, List<CodeChunk> chunks) {
         Repository repo = repositoryRepository.findById(repoId)
                 .orElseThrow(() -> new ResourceNotFoundException("Repository", "id", repoId));
 
@@ -201,53 +211,98 @@ public class IndexingService {
         log.info("Using embedding model: {}", provider.getModel().getModelTag());
         log.info("Embedding dimension: {}", provider.getModel().getDimension());
 
-        List<CodeChunk> chunks = codeChunkRepository.findByRepository_Id(repoId);
-        log.info("Generating embeddings for {} chunks", chunks.size());
+        // Filter out empty chunks first
+        List<CodeChunk> nonEmptyChunks = chunks.stream()
+                .filter(chunk -> chunk.getContent() != null && !chunk.getContent().isBlank())
+                .toList();
 
-        // Buffer embeddings and save in batches.
-        // Avoids one huge DB transaction for all chunks.
-        List<CodeChunk> batch = new ArrayList<>();
+        log.info("Processing {} non-empty chunks", nonEmptyChunks.size());
 
-        for (CodeChunk chunk : chunks) {
-            // Skip empty files
-            if (chunk.getContent() == null || chunk.getContent().isBlank()) {
-                continue;
+        // Process in batches
+        List<String> batchTexts = new ArrayList<>();
+        List<CodeChunk> batchChunks = new ArrayList<>();
+
+        for (int i = 0; i < nonEmptyChunks.size(); i++) {
+            CodeChunk chunk = nonEmptyChunks.get(i);
+
+            batchTexts.add(chunk.getContent());
+            batchChunks.add(chunk);
+
+            // When batch reaches size, embed the whole batch
+            if (batchTexts.size() >= EMBEDDING_BATCH_SIZE) {
+                embedBatchAndSave(repo, provider, batchTexts, batchChunks);
+                batchTexts.clear();
+                batchChunks.clear();
+            }
+        }
+
+        // Process remaining chunks
+        if (!batchTexts.isEmpty()) {
+            embedBatchAndSave(repo, provider, batchTexts, batchChunks);
+        }
+
+        log.info("Completed embedding generation for repo {}", repoId);
+    }
+
+    // New helper method for batch embedding
+    private void embedBatchAndSave(Repository repo, EmbeddingProvider provider,
+            List<String> texts, List<CodeChunk> chunks) {
+        try {
+            providerMetrics.getOrCreate(repo.getEmbeddingModel()).markActive();
+            long start = System.currentTimeMillis();
+
+            // Batch embedding call - single API call for multiple texts
+            List<float[]> embeddings = provider.embedBatch(texts);
+
+            long latency = System.currentTimeMillis() - start;
+            providerMetrics.recordSuccess(repo.getEmbeddingModel(), latency);
+
+            // Assign embeddings to chunks
+            for (int i = 0; i < chunks.size(); i++) {
+                chunks.get(i).setEmbedding(embeddings.get(i));
             }
 
+            // Save batch to database
+            codeChunkRepository.saveAll(chunks);
+            log.info("Saved embedding batch of {} chunks (latency: {} ms)", chunks.size(), latency);
+
+        } catch (Exception e) {
+            providerMetrics.recordFailure(repo.getEmbeddingModel());
+            log.error("Batch embedding failed for {} chunks", chunks.size(), e);
+
+            // Optional: Fallback to individual embeddings for this batch
+            log.info("Falling back to individual embeddings for {} chunks", chunks.size());
+            fallbackToIndividualEmbeddings(repo, provider, chunks);
+        }
+    }
+
+    // Optional: Fallback method if batch fails
+    private void fallbackToIndividualEmbeddings(Repository repo, EmbeddingProvider provider,
+            List<CodeChunk> chunks) {
+        List<CodeChunk> savedChunks = new ArrayList<>();
+
+        for (CodeChunk chunk : chunks) {
             try {
-                providerMetrics.getOrCreate(repo.getEmbeddingModel()).markActive();
                 long start = System.currentTimeMillis();
-
-                // Generate vector
                 float[] embedding = provider.embed(chunk.getContent());
-
                 long latency = System.currentTimeMillis() - start;
                 providerMetrics.recordSuccess(repo.getEmbeddingModel(), latency);
 
                 chunk.setEmbedding(embedding);
+                savedChunks.add(chunk);
 
-                batch.add(chunk);
-
-                // Persist every N chunks
-                if (batch.size() >= EMBEDDING_BATCH_SIZE) {
-                    codeChunkRepository.saveAll(batch);
-                    log.info("Saved embedding batch of {}", batch.size());
-                    batch.clear();
+                if (savedChunks.size() >= EMBEDDING_BATCH_SIZE) {
+                    codeChunkRepository.saveAll(savedChunks);
+                    savedChunks.clear();
                 }
             } catch (Exception e) {
                 providerMetrics.recordFailure(repo.getEmbeddingModel());
-                log.error(
-                        "Embedding failed for chunk {}",
-                        chunk.getId(),
-                        e);
+                log.error("Individual embedding failed for chunk {}", chunk.getId(), e);
             }
         }
 
-        // Save remaining chunks
-        if (!batch.isEmpty()) {
-            codeChunkRepository.saveAll(batch);
-
-            log.info("Saved final batch of {}", batch.size());
+        if (!savedChunks.isEmpty()) {
+            codeChunkRepository.saveAll(savedChunks);
         }
     }
 

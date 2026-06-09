@@ -1,5 +1,7 @@
 package com.codebasecartographer.api.service.embeddingServices.providers;
 
+import java.util.List;
+
 import org.springframework.web.client.RestClient;
 
 import com.codebasecartographer.api.dto.request.EmbeddingRequest;
@@ -23,15 +25,20 @@ public class GemmaEmbeddingProvider implements EmbeddingProvider {
     }
 
     @Override
-    public float[] embed(String text) {
+    public List<float[]> embedBatch(List<String> texts) {
         EmbeddingModel model = getModel();
         EmbeddingResponse response = restClient.post()
                 .uri("/api/embed")
-                .body(new EmbeddingRequest(model.getModelTag(), text, model.getDimension()))
+                .body(new EmbeddingRequest(model.getModelTag(), texts, model.getDimension()))
                 .retrieve()
                 .body(EmbeddingResponse.class);
 
-        return response.embeddings().get(0);
+        return response.embeddings();
+    }
+
+    @Override
+    public float[] embed(String text) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'embed'");
     }
 }
-
