@@ -51,4 +51,25 @@ public interface CodeChunkRepository extends JpaRepository<CodeChunk, String> {
         @Param("repoId") String repoId,
         @Param("queryVector") String queryVector,
         @Param("limit") int limit);
+
+    // Semantic search with similarity threshold and explicit result columns
+    @Query(value = """
+        SELECT
+            c.id,
+            c.content,
+            c.file_path,
+            c.start_line,
+            c.end_line,
+            1 - (c.embedding <=> CAST(:queryEmbedding AS vector)) AS similarity
+        FROM code_chunks c
+        WHERE c.repo_id = :repoId
+            AND 1 - (c.embedding <=> CAST(:queryEmbedding AS vector)) >= :threshold
+        ORDER BY c.embedding <=> CAST(:queryEmbedding AS vector)
+        LIMIT :limit
+        """, nativeQuery = true)
+    List<Object[]> findSimilarChunks(
+        @Param("repoId") String repoId,
+        @Param("queryEmbedding") String queryEmbedding,
+        @Param("threshold") double threshold,
+        @Param("limit") int limit);
 }
