@@ -6,10 +6,11 @@ import java.util.List;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.codebasecartographer.api.dto.ASTChunk;
 import com.codebasecartographer.api.dto.response.RepoResponse;
 import com.codebasecartographer.api.entity.CodeChunk;
 import com.codebasecartographer.api.entity.Repository;
-import com.codebasecartographer.api.enums.ChunkType;
+import com.codebasecartographer.api.enums.ProgrammingLanguage;
 import com.codebasecartographer.api.enums.RepositoryStatus;
 import com.codebasecartographer.api.exception.ConflictException;
 import com.codebasecartographer.api.exception.ResourceNotFoundException;
@@ -36,6 +37,7 @@ public class IndexingService {
     private final EmbeddingModelSelector modelSelector;
     private final EmbeddingProviderMetrics providerMetrics;
     private final com.codebasecartographer.api.controller.IndexingSSEController sseController;
+    private final InProcessASTChunkingService inProcessASTChunkingService;
 
     private static final int EMBEDDING_BATCH_SIZE = 20; // Adjust based on Ollama's limits
 
@@ -47,7 +49,8 @@ public class IndexingService {
             EmbeddingProviderFactory providerFactory,
             EmbeddingModelSelector modelSelector,
             EmbeddingProviderMetrics providerMetrics,
-            com.codebasecartographer.api.controller.IndexingSSEController sseController) {
+            com.codebasecartographer.api.controller.IndexingSSEController sseController,
+            InProcessASTChunkingService inProcessASTChunkingService) {
         this.repositoryRepository = repositoryRepository;
         this.codeChunkRepository = codeChunkRepository;
         this.repoService = repoService;
@@ -57,6 +60,7 @@ public class IndexingService {
         this.modelSelector = modelSelector;
         this.providerMetrics = providerMetrics;
         this.sseController = sseController;
+        this.inProcessASTChunkingService = inProcessASTChunkingService;
     }
 
     // Called when user clicks "Index repo" on dashboard
@@ -132,7 +136,7 @@ public class IndexingService {
             int processed = 0;
             for (GithubFile file : files) {
                 try {
-                    chunks.add(buildChunk(repository, file));
+                    chunks.addAll(buildChunks(repository, file));
                 } catch (Exception e) {
                     log.warn("Skipping file {}: {}", file.path(), e.getMessage());
                 }
@@ -182,23 +186,29 @@ public class IndexingService {
         }
     }
 
-    private CodeChunk buildChunk(Repository repo, GithubFile file) {
-        return CodeChunk.builder()
-                .repository(repo)
-                .filePath(file.path())
-                .chunkType(ChunkType.MODULE)
-                .chunkName(FileUtils.extractFileName(file.path()))
-                .content(file.content())
-                .startLine(1)
-                .endLine(countLines(file.content()))
-                .aiReferenceCount(0)
-                .build();
-    }
+    private List<CodeChunk> buildChunks(Repository repo, GithubFile file) {
+        ProgrammingLanguage language = ProgrammingLanguage.fromExtension(file.path());
+        List<ASTChunk> astChunks = inProcessASTChunkingService.chunkCode(file.content(), language);
 
-    private int countLines(String content) {
-        if (content == null || content.isEmpty())
-            return 0;
-        return (int) content.lines().count();
+        List<CodeChunk> chunks = new ArrayList<>();
+        for (ASTChunk astChunk : astChunks) {
+            String entityName = astChunk.getEntityName();
+            String chunkName = entityName != null ? entityName : FileUtils.extractFileName(file.path());
+
+            chunks.add(CodeChunk.builder()
+                    .repository(repo)
+                    .filePath(file.path())
+                    .chunkType(ASTChunk.mapChunkType(astChunk.getChunkType()))
+                    .chunkName(chunkName)
+                    .content(astChunk.getContent())
+                    .startLine(astChunk.getStartLine())
+                    .endLine(astChunk.getEndLine())
+                    .scopeChain(astChunk.getScopeChain())
+                    .entityName(entityName)
+                    .aiReferenceCount(0)
+                    .build());
+        }
+        return chunks;
     }
 
     // Fetch all chunks for this repo (no embedding yet), batch-call embeddings API,

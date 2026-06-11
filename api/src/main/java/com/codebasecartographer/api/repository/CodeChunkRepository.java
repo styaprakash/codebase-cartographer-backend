@@ -43,7 +43,7 @@ public interface CodeChunkRepository extends JpaRepository<CodeChunk, String> {
     @Query(value = """
         SELECT * FROM code_chunks
         WHERE repo_id = :repoId
-          AND embedding IS NOT NULL
+        AND embedding IS NOT NULL
         ORDER BY embedding <=> CAST(:queryVector AS vector)
         LIMIT :limit
         """, nativeQuery = true)

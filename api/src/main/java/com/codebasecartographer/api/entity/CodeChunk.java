@@ -35,9 +35,8 @@ public class CodeChunk {
 
     // Which repo this chunk belongs to
     @ManyToOne
-    @JoinColumn(name = "repo_id", nullable = false) // use snake-case as JPA auto-converts Java camelCase → snake_case
-                                                    // for fields
-    private Repository repository;
+    @JoinColumn(name = "repo_id", nullable = false)
+    private Repository repository; // for fields
 
     // Full file path e.g. 'src/auth/login.ts'
     @Column(nullable = false)
@@ -63,6 +62,14 @@ public class CodeChunk {
     // Last line of this chunk in the file
     @Column(nullable = false)
     private Integer endLine;
+
+    // Hierarchical scope: ClassName > methodName
+    @Column(length = 500)
+    private String scopeChain;
+
+    // Function/class/method name extracted via AST
+    @Column(length = 255)
+    private String entityName;
 
     // embedding field added in Week 3 with pgvector setup: Completed
     @Column(columnDefinition = "vector")

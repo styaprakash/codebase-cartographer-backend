@@ -35,7 +35,7 @@ public class QueryLog {
 
     // Which repo was being queried
     @ManyToOne
-    @JoinColumn(name = "repo_id", nullable = false) //use snake-case as JPA auto-converts Java camelCase → snake_case for fields
+    @JoinColumn(name = "repo_id", nullable = false) //used snake-case as JPA auto-converts Java camelCase → snake_case for fields
     private Repository repository;
 
     // The user's original question

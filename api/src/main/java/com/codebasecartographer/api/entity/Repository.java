@@ -61,8 +61,7 @@ public class Repository {
     private String language;
 
     // Embedding model assigned at indexing time — immutable after first indexing.
-    // Dimension and provider type are derived from the enum (single source of
-    // truth).
+    // Dimension and provider type are derived from the enum (single source of truth).
     @Enumerated(EnumType.STRING)
     @Column(name = "embedding_model", nullable = true)
     private com.codebasecartographer.api.enums.EmbeddingModel embeddingModel;

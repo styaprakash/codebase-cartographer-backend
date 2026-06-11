@@ -22,6 +22,7 @@ public class IndexingSSEController {
 
     private final Map<String, SseEmitter> emitters = new ConcurrentHashMap<>();
 
+    @SuppressWarnings("null")
     @GetMapping(value = "/{repoId}/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter stream(@PathVariable String repoId) {
         SseEmitter emitter = new SseEmitter(3600000L); // 1 hour timeout
@@ -40,6 +41,7 @@ public class IndexingSSEController {
         return emitter;
     }
 
+    @SuppressWarnings("null")
     public void sendProgress(String repoId, int current, int total, int percentage, String currentFile) {
         SseEmitter emitter = emitters.get(repoId);
         if (emitter != null) {
@@ -59,6 +61,7 @@ public class IndexingSSEController {
         }
     }
 
+    @SuppressWarnings("null")
     public void sendFileCompleted(String repoId, String fileName, int indexedCount) {
         SseEmitter emitter = emitters.get(repoId);
         if (emitter != null) {
