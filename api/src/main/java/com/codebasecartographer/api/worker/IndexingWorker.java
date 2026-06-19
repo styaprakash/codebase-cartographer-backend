@@ -2,28 +2,36 @@ package com.codebasecartographer.api.worker;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
+import org.springframework.context.annotation.DependsOn;
 import org.springframework.stereotype.Component;
 
+import com.codebasecartographer.api.entity.Repository;
 import com.codebasecartographer.api.enums.RepositoryStatus;
 import com.codebasecartographer.api.repository.CodeChunkRepository;
 import com.codebasecartographer.api.repository.RepositoryRepository;
 import com.codebasecartographer.api.service.DragonflyQueueService;
 import com.codebasecartographer.api.service.IndexingService;
 import com.codebasecartographer.api.service.RepoService;
-import com.codebasecartographer.api.entity.Repository;
 
 import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @Component
+@DependsOn({"redisConnectionFactory", "dragonflyQueueService"})
 public class IndexingWorker {
     private final DragonflyQueueService dragonflyQueueService;
     private final IndexingService indexingService;
     private final RepoService repoService;
     private final RepositoryRepository repositoryRepository;
     private final CodeChunkRepository codeChunkRepository;
+
+    private volatile boolean running = true;
+    private Thread workerThread;
+    private ExecutorService executor;
 
     // constructor injection
     public IndexingWorker(DragonflyQueueService dragonflyQueueService,
@@ -42,14 +50,13 @@ public class IndexingWorker {
     // auto-starts when backend boots.
     @PostConstruct
     public void startWorker() {
-        ExecutorService executor = Executors.newFixedThreadPool(10);
-        Thread workerThread = new Thread(() -> {
+        executor = Executors.newFixedThreadPool(10);
+
+        workerThread = new Thread(() -> {
             log.info("Indexing Worker started...");
-            // Keep checking queue forever
-            while (true) {
+            while (running) {
                 try {
-                    String repoId = dragonflyQueueService.dequeue(); // rightPop() internally
-                    // dequeue() blocks for 2s if empty — no sleep needed
+                    String repoId = dragonflyQueueService.dequeue();
                     if (repoId != null) {
                         executor.submit(() -> {
                             log.info("Repo {} -> INDEXING", repoId);
@@ -104,12 +111,47 @@ public class IndexingWorker {
                             }
                         });
                     }
+                } catch (IllegalStateException ex) {
+                    if (ex.getMessage() != null && (ex.getMessage().contains("destroyed") || ex.getMessage().contains("STOPPED"))) {
+                        log.info("Redis connection destroyed or stopped, stopping worker");
+                        break;
+                    }
+                    log.error("Worker error", ex);
                 } catch (Exception ex) {
                     log.error("Worker error", ex);
                 }
             }
+            log.info("Indexing Worker stopped");
         });
-        workerThread.setDaemon(true); // Thread should die automatically when app shuts down.
+        workerThread.setDaemon(true);
         workerThread.start();
+    }
+
+    @PreDestroy
+    public void stopWorker() {
+        log.info("Shutting down IndexingWorker...");
+        running = false;
+        try {
+            Thread.sleep(50);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        if (workerThread != null) {
+            workerThread.interrupt();
+            try {
+                workerThread.join(5000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        if (executor != null) {
+            executor.shutdownNow();
+            try {
+                executor.awaitTermination(5, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        log.info("IndexingWorker shut down complete");
     }
 }

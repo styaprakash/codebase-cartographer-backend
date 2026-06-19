@@ -33,17 +33,23 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         throws ServletException, IOException {
         //Step 1: Read the authorization header
         String authHeader = request.getHeader("Authorization");
+        String token = null;
 
-        //Step 2: No header or wrong format -> skip auth
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            //Step 3: get the token by removing "Bearer " from the header
+            token = authHeader.substring(7);
+        } else {
+            // Check for access_token query parameter (used by EventSource for SSE)
+            token = request.getParameter("access_token");
+        }
+
+        //Step 2: No token -> skip auth
         // Request continues without authentication
         // SecurityConfig decides if endpoint needs auth
-        if(authHeader == null || !authHeader.startsWith("Bearer ")){
+        if(token == null){
             filterChain.doFilter(request, response);
             return;
         }
-
-        //Step 3: get the token by removing "Bearer " from the header
-        String token = authHeader.substring(7);
 
         // Step 4 — Validate token
         if(!jwtService.validateToken(token)){

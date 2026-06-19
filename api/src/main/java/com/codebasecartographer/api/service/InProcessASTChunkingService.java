@@ -11,6 +11,7 @@ import com.codebasecartographer.api.dto.ASTChunk;
 import com.codebasecartographer.api.enums.ProgrammingLanguage;
 
 import ch.usi.si.seart.treesitter.Language;
+import ch.usi.si.seart.treesitter.LibraryLoader;
 import ch.usi.si.seart.treesitter.Node;
 import ch.usi.si.seart.treesitter.Parser;
 import ch.usi.si.seart.treesitter.Tree;
@@ -37,22 +38,34 @@ public class InProcessASTChunkingService {
         "class_definition"
     );
 
-    private static final Map<ProgrammingLanguage, Language> LANGUAGE_MAP = Map.of(
-        ProgrammingLanguage.JAVA, Language.JAVA,
-        ProgrammingLanguage.PYTHON, Language.PYTHON,
-        ProgrammingLanguage.TYPESCRIPT, Language.TYPESCRIPT,
-        ProgrammingLanguage.JAVASCRIPT, Language.TYPESCRIPT,
-        ProgrammingLanguage.GO, Language.GO,
-        ProgrammingLanguage.RUST, Language.RUST,
-        ProgrammingLanguage.CPP, Language.CPP
-    );
+    private static volatile Map<ProgrammingLanguage, Language> languageMap;
+
+    private static Map<ProgrammingLanguage, Language> getLanguageMap() {
+        if (languageMap == null) {
+            synchronized (InProcessASTChunkingService.class) {
+                if (languageMap == null) {
+                    LibraryLoader.load();
+                    languageMap = Map.of(
+                        ProgrammingLanguage.JAVA, Language.JAVA,
+                        ProgrammingLanguage.PYTHON, Language.PYTHON,
+                        ProgrammingLanguage.TYPESCRIPT, Language.TYPESCRIPT,
+                        ProgrammingLanguage.JAVASCRIPT, Language.TYPESCRIPT,
+                        ProgrammingLanguage.GO, Language.GO,
+                        ProgrammingLanguage.RUST, Language.RUST,
+                        ProgrammingLanguage.CPP, Language.CPP
+                    );
+                }
+            }
+        }
+        return languageMap;
+    }
 
     public List<ASTChunk> chunkCode(String code, ProgrammingLanguage language) {
         if (code == null || code.isBlank()) {
             return List.of();
         }
 
-        Language tsLanguage = language != null ? LANGUAGE_MAP.get(language) : null;
+        Language tsLanguage = language != null ? getLanguageMap().get(language) : null;
         if (tsLanguage == null) {
             log.warn("Unsupported or null language {}, falling back to line-based chunking", language);
             return fallbackChunkByLines(code);
