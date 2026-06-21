@@ -59,55 +59,59 @@ public class IndexingWorker {
                     String repoId = dragonflyQueueService.dequeue();
                     if (repoId != null) {
                         executor.submit(() -> {
-                            log.info("Repo {} -> INDEXING", repoId);
-                            repoService.updateStatus(repoId, RepositoryStatus.INDEXING);
+                            try {
+                                log.info("Repo {} -> INDEXING", repoId);
+                                repoService.updateStatus(repoId, RepositoryStatus.INDEXING);
 
-                            Repository repo = repositoryRepository.findById(repoId).orElse(null);
+                                Repository repo = repositoryRepository.findById(repoId).orElse(null);
 
-                            long total = codeChunkRepository.countByRepository_Id(repoId);
+                                long total = codeChunkRepository.countByRepository_Id(repoId);
 
-                            long embedded = codeChunkRepository.countByRepository_IdAndEmbeddingIsNotNull(repoId);
+                                long embedded = codeChunkRepository.countByRepository_IdAndEmbeddingIsNotNull(repoId);
 
-                            // This is for self healing from failed embeddings
-                            if (total > 0 && embedded < total) {
-                                log.warn(
-                                        "Repo {} has missing embeddings. total={}, embedded={}",
-                                        repoId,
-                                        total,
-                                        embedded);
-                                if (repo != null && repo.getEmbeddingModel() == null) {
-                                    log.error("Repo {} has chunks but no embedding model assigned. Skipping self-heal.",
-                                            repoId);
-                                    repoService.setErrorMessage(repoId,
-                                            "Cannot self-heal: no embedding model assigned");
-                                    return;
-                                }
-
-                                indexingService.generateMissingEmbeddings(repoId);
-
-                                long totalAfter = codeChunkRepository.countByRepository_Id(repoId);
-
-                                long embeddedAfter = codeChunkRepository
-                                        .countByRepository_IdAndEmbeddingIsNotNull(repoId);
-
-                                if (totalAfter == embeddedAfter) {
-                                    repoService.updateStatus(
-                                            repoId,
-                                            RepositoryStatus.INDEXED);
-                                    log.info(
-                                            "Repo {} successfully repaired. {} / {} embeddings present.",
-                                            repoId,
-                                            embeddedAfter,
-                                            totalAfter);
-                                } else {
+                                // This is for self healing from failed embeddings
+                                if (total > 0 && embedded < total) {
                                     log.warn(
-                                            "Repo {} repair incomplete. {} / {} embeddings present.",
+                                            "Repo {} has missing embeddings. total={}, embedded={}",
                                             repoId,
-                                            embeddedAfter,
-                                            totalAfter);
+                                            total,
+                                            embedded);
+                                    if (repo != null && repo.getEmbeddingModel() == null) {
+                                        log.error("Repo {} has chunks but no embedding model assigned. Skipping self-heal.",
+                                                repoId);
+                                        repoService.setErrorMessage(repoId,
+                                                "Cannot self-heal: no embedding model assigned");
+                                        return;
+                                    }
+
+                                    indexingService.generateMissingEmbeddings(repoId);
+
+                                    long totalAfter = codeChunkRepository.countByRepository_Id(repoId);
+
+                                    long embeddedAfter = codeChunkRepository
+                                            .countByRepository_IdAndEmbeddingIsNotNull(repoId);
+
+                                    if (totalAfter == embeddedAfter) {
+                                        repoService.updateStatus(
+                                                repoId,
+                                                RepositoryStatus.INDEXED);
+                                        log.info(
+                                                "Repo {} successfully repaired. {} / {} embeddings present.",
+                                                repoId,
+                                                embeddedAfter,
+                                                totalAfter);
+                                    } else {
+                                        log.warn(
+                                                "Repo {} repair incomplete. {} / {} embeddings present.",
+                                                repoId,
+                                                embeddedAfter,
+                                                totalAfter);
+                                    }
+                                } else {
+                                    indexingService.processIndexingJob(repoId);
                                 }
-                            } else {
-                                indexingService.processIndexingJob(repoId);
+                            } finally {
+                                dragonflyQueueService.complete(repoId);
                             }
                         });
                     }

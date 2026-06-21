@@ -23,6 +23,18 @@ import com.codebasecartographer.api.service.embeddingServices.factory.EmbeddingP
 import com.codebasecartographer.api.service.embeddingServices.providers.EmbeddingProvider;
 import com.codebasecartographer.api.utils.FileUtils;
 
+import org.springframework.context.ApplicationEventPublisher;
+import java.util.zip.ZipInputStream;
+import java.util.zip.ZipEntry;
+import java.io.InputStream;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.net.URI;
+import com.codebasecartographer.api.event.IndexingFileEvent;
+import com.codebasecartographer.api.event.IndexingStatusEvent;
+import java.nio.charset.StandardCharsets;
+
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -36,7 +48,7 @@ public class IndexingService {
     private final EmbeddingProviderFactory providerFactory;
     private final EmbeddingModelSelector modelSelector;
     private final EmbeddingProviderMetrics providerMetrics;
-    private final com.codebasecartographer.api.controller.IndexingSSEController sseController;
+    private final ApplicationEventPublisher eventPublisher;
     private final InProcessASTChunkingService inProcessASTChunkingService;
 
     private static final int EMBEDDING_BATCH_SIZE = 20; // Adjust based on Ollama's limits
@@ -49,7 +61,7 @@ public class IndexingService {
             EmbeddingProviderFactory providerFactory,
             EmbeddingModelSelector modelSelector,
             EmbeddingProviderMetrics providerMetrics,
-            com.codebasecartographer.api.controller.IndexingSSEController sseController,
+            ApplicationEventPublisher eventPublisher,
             InProcessASTChunkingService inProcessASTChunkingService) {
         this.repositoryRepository = repositoryRepository;
         this.codeChunkRepository = codeChunkRepository;
@@ -59,7 +71,7 @@ public class IndexingService {
         this.providerFactory = providerFactory;
         this.modelSelector = modelSelector;
         this.providerMetrics = providerMetrics;
-        this.sseController = sseController;
+        this.eventPublisher = eventPublisher;
         this.inProcessASTChunkingService = inProcessASTChunkingService;
     }
 
@@ -117,89 +129,118 @@ public class IndexingService {
         }
 
         String accessToken = repository.getUser().getAccessToken();
+        String[] parts = repository.getFullName().split("/");
+        String owner = parts[0];
+        String repoName = parts[1];
+        String branch = repository.getBranch();
 
         try {
-            log.info("Fetching files from GitHub for: {}", repository.getFullName());
-            List<GithubFile> files = gitHubFileService.fetchRepoFiles(repository, accessToken);
+            log.info("Fetching zipball from GitHub for: {}", repository.getFullName());
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("https://api.github.com/repos/" + owner + "/" + repoName + "/zipball/" + branch))
+                    .header("Authorization", "Bearer " + accessToken)
+                    .header("Accept", "application/vnd.github+json")
+                    .GET()
+                    .build();
 
-            if (files.isEmpty()) {
-                repoService.setErrorMessage(
-                        repoId,
-                        "No supported files found.");
-                log.warn("No supported files found for repo: {}", repository.getFullName());
-                return;
+            HttpResponse<InputStream> response = HttpClient.newBuilder()
+                    .followRedirects(HttpClient.Redirect.NORMAL)
+                    .build()
+                    .send(request, HttpResponse.BodyHandlers.ofInputStream());
+
+            if (response.statusCode() != 200) {
+                throw new RuntimeException("Failed to fetch zipball, status: " + response.statusCode());
             }
-            log.info("Found {} files to index", files.size());
 
-            int totalFiles = files.size();
-            java.util.concurrent.atomic.AtomicInteger processed = new java.util.concurrent.atomic.AtomicInteger(0);
-            // Fixed pool size to align safely with the HikariCP database connection pool size
             int threads = 20;
             java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(threads);
-
             List<CodeChunk> sharedBuffer = java.util.Collections.synchronizedList(new ArrayList<>());
+            List<java.util.concurrent.CompletableFuture<Void>> futures = new ArrayList<>();
 
-            List<java.util.concurrent.CompletableFuture<Void>> futures = files.stream().map(file -> 
-                java.util.concurrent.CompletableFuture.runAsync(() -> {
+            java.util.concurrent.atomic.AtomicInteger processed = new java.util.concurrent.atomic.AtomicInteger(0);
+
+            try (ZipInputStream zis = new ZipInputStream(response.body())) {
+                ZipEntry entry;
+                while ((entry = zis.getNextEntry()) != null) {
+                    if (entry.isDirectory()) {
+                        continue;
+                    }
+                    String path = entry.getName();
+                    int firstSlash = path.indexOf('/');
+                    if (firstSlash != -1) {
+                        path = path.substring(firstSlash + 1);
+                    }
+
+                    if (!isSupportedFile(path)) {
+                        continue;
+                    }
+
+                    byte[] contentBytes = zis.readAllBytes();
+                    String content = new String(contentBytes, StandardCharsets.UTF_8);
+
+                    final String filePath = path;
+                    final GitHubFileService.GithubFile file = new GitHubFileService.GithubFile(filePath, content);
+
                     int currentIndex = processed.incrementAndGet();
                     
-                    // SSE: File Started
-                    sseController.sendFileEvent(repoId, "indexing", file.path(), currentIndex, totalFiles);
+                    eventPublisher.publishEvent(new IndexingFileEvent(this, repoId, "indexing", filePath, currentIndex, 0));
 
-                    // DIFFERENTIAL INDEXING HOOK
-                    // TODO: Inject logic to check file hashes here.
+                    futures.add(java.util.concurrent.CompletableFuture.runAsync(() -> {
+                        try {
+                            List<CodeChunk> fileChunks = buildChunks(repository, file);
 
-                    try {
-                        List<CodeChunk> fileChunks = buildChunks(repository, file);
+                            if (!fileChunks.isEmpty()) {
+                                List<List<CodeChunk>> batchesToProcess = new ArrayList<>();
+                                synchronized (sharedBuffer) {
+                                    sharedBuffer.addAll(fileChunks);
+                                    while (sharedBuffer.size() >= EMBEDDING_BATCH_SIZE) {
+                                        List<CodeChunk> batch = new ArrayList<>(sharedBuffer.subList(0, EMBEDDING_BATCH_SIZE));
+                                        sharedBuffer.subList(0, EMBEDDING_BATCH_SIZE).clear();
+                                        batchesToProcess.add(batch);
+                                    }
+                                }
 
-                        if (!fileChunks.isEmpty()) {
-                            List<List<CodeChunk>> batchesToProcess = new ArrayList<>();
-                            synchronized (sharedBuffer) {
-                                sharedBuffer.addAll(fileChunks);
-                                while (sharedBuffer.size() >= EMBEDDING_BATCH_SIZE) {
-                                    List<CodeChunk> batch = new ArrayList<>(sharedBuffer.subList(0, EMBEDDING_BATCH_SIZE));
-                                    sharedBuffer.subList(0, EMBEDDING_BATCH_SIZE).clear();
-                                    batchesToProcess.add(batch);
+                                for (List<CodeChunk> batch : batchesToProcess) {
+                                    generateAndSaveEmbeddingsForBatch(repoId, batch);
                                 }
                             }
 
-                            // Process the full batches extracted
-                            for (List<CodeChunk> batch : batchesToProcess) {
-                                generateAndSaveEmbeddingsForBatch(repoId, batch);
-                            }
+                            eventPublisher.publishEvent(new IndexingFileEvent(this, repoId, "completed", filePath, currentIndex, 0));
+
+                        } catch (Exception e) {
+                            log.warn("Skipping file {}: {}", filePath, e.getMessage());
+                            eventPublisher.publishEvent(new IndexingFileEvent(this, repoId, "completed", filePath, currentIndex, 0));
                         }
+                    }, executor));
+                }
+            }
 
-                        // SSE: File Completed
-                        sseController.sendFileEvent(repoId, "completed", file.path(), currentIndex, totalFiles);
-
-                    } catch (Exception e) {
-                        log.warn("Skipping file {}: {}", file.path(), e.getMessage());
-                        sseController.sendFileEvent(repoId, "completed", file.path(), currentIndex, totalFiles);
-                    }
-                }, executor)
-            ).toList();
-
-            // Wait for all processing to complete
             java.util.concurrent.CompletableFuture.allOf(futures.toArray(new java.util.concurrent.CompletableFuture[0])).join();
             executor.shutdown();
 
-            // Explicitly flush any trailing chunks
             if (!sharedBuffer.isEmpty()) {
                 generateAndSaveEmbeddingsForBatch(repoId, new ArrayList<>(sharedBuffer));
                 sharedBuffer.clear();
             }
 
-            // Mark as INDEXED
             repoService.updateStatus(repoId, RepositoryStatus.INDEXED);
-            sseController.sendStatus(repoId, RepositoryStatus.INDEXED, null);
+            eventPublisher.publishEvent(new IndexingStatusEvent(this, repoId, RepositoryStatus.INDEXED, null));
             log.info("Indexing complete for: {}", repository.getFullName());
 
         } catch (Exception e) {
             log.error("Indexing failed for repo: {}", repoId, e);
             String errorMessage = determineErrorMessage(e);
             repoService.setErrorMessage(repoId, errorMessage);
-            sseController.sendStatus(repoId, RepositoryStatus.FAILED, errorMessage);
+            eventPublisher.publishEvent(new IndexingStatusEvent(this, repoId, RepositoryStatus.FAILED, errorMessage));
         }
+    }
+
+    private boolean isSupportedFile(String path) {
+        java.util.Set<String> SUPPORTED_EXTENSIONS = java.util.Set.of(
+            ".java", ".ts", ".tsx", ".js", ".jsx",
+            ".py", ".go", ".rs", ".cpp", ".c"
+        );
+        return SUPPORTED_EXTENSIONS.stream().anyMatch(path::endsWith);
     }
 
     private List<CodeChunk> buildChunks(Repository repo, GithubFile file) {
