@@ -42,39 +42,23 @@ public class IndexingSSEController {
     }
 
     @SuppressWarnings("null")
-    public void sendProgress(String repoId, int current, int total, int percentage, String currentFile) {
+    public void sendFileEvent(String repoId, String status, String filePath, int progress, int totalFiles) {
         SseEmitter emitter = emitters.get(repoId);
         if (emitter != null) {
-            try {
-                emitter.send(SseEmitter.event()
-                        .name("progress")
-                        .data(Map.of(
-                                "current", current,
-                                "total", total,
-                                "percentage", percentage,
-                                "currentFile", currentFile != null ? currentFile : ""
-                        )));
-            } catch (IOException e) {
-                log.warn("Failed to send progress event, removing emitter for repo: {}", repoId);
-                emitters.remove(repoId);
-            }
-        }
-    }
-
-    @SuppressWarnings("null")
-    public void sendFileCompleted(String repoId, String fileName, int indexedCount) {
-        SseEmitter emitter = emitters.get(repoId);
-        if (emitter != null) {
-            try {
-                emitter.send(SseEmitter.event()
-                        .name("file_complete")
-                        .data(Map.of(
-                                "fileName", fileName,
-                                "indexedCount", indexedCount
-                        )));
-            } catch (IOException e) {
-                log.warn("Failed to send file_complete event, removing emitter for repo: {}", repoId);
-                emitters.remove(repoId);
+            synchronized (emitter) {
+                try {
+                    emitter.send(SseEmitter.event()
+                            .name("file_event")
+                            .data(Map.of(
+                                    "status", status, // "indexing" or "completed"
+                                    "file_path", filePath,
+                                    "progress", progress,
+                                    "total_files", totalFiles
+                            )));
+                } catch (IOException e) {
+                    log.warn("Failed to send file_event, removing emitter for repo: {}", repoId);
+                    emitters.remove(repoId);
+                }
             }
         }
     }
@@ -82,23 +66,25 @@ public class IndexingSSEController {
     public void sendStatus(String repoId, RepositoryStatus status, String errorMessage) {
         SseEmitter emitter = emitters.get(repoId);
         if (emitter != null) {
-            try {
-                Map<String, Object> data = new java.util.HashMap<>();
-                data.put("status", status);
-                if (errorMessage != null) {
-                    data.put("errorMessage", errorMessage);
-                }
-                emitter.send(SseEmitter.event()
-                        .name("status")
-                        .data(data));
+            synchronized (emitter) {
+                try {
+                    Map<String, Object> data = new java.util.HashMap<>();
+                    data.put("status", status);
+                    if (errorMessage != null) {
+                        data.put("errorMessage", errorMessage);
+                    }
+                    emitter.send(SseEmitter.event()
+                            .name("status")
+                            .data(data));
 
-                if (status == RepositoryStatus.INDEXED || status == RepositoryStatus.FAILED) {
-                    emitter.complete();
+                    if (status == RepositoryStatus.INDEXED || status == RepositoryStatus.FAILED) {
+                        emitter.complete();
+                        emitters.remove(repoId);
+                    }
+                } catch (IOException e) {
+                    log.warn("Failed to send status event, removing emitter for repo: {}", repoId);
                     emitters.remove(repoId);
                 }
-            } catch (IOException e) {
-                log.warn("Failed to send status event, removing emitter for repo: {}", repoId);
-                emitters.remove(repoId);
             }
         }
     }

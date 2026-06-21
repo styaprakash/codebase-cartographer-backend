@@ -131,46 +131,62 @@ public class IndexingService {
             }
             log.info("Found {} files to index", files.size());
 
-            // Build and save chunks in batches with progress updates
-            List<CodeChunk> chunks = new ArrayList<>();
-            int processed = 0;
-            for (GithubFile file : files) {
-                try {
-                    chunks.addAll(buildChunks(repository, file));
-                } catch (Exception e) {
-                    log.warn("Skipping file {}: {}", file.path(), e.getMessage());
-                }
-                processed++;
+            int totalFiles = files.size();
+            java.util.concurrent.atomic.AtomicInteger processed = new java.util.concurrent.atomic.AtomicInteger(0);
+            // Fixed pool size to align safely with the HikariCP database connection pool size
+            int threads = 20;
+            java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(threads);
 
-                // Flush to DB every 500 files WITH embeddings generated
-                if (processed % 500 == 0) {
-                    generateAndSaveEmbeddingsForBatch(repoId, chunks);
+            List<CodeChunk> sharedBuffer = java.util.Collections.synchronizedList(new ArrayList<>());
 
-                    // Send SSE events
-                    for (int i = 0; i < chunks.size(); i++) {
-                        int currentCount = processed - chunks.size() + i + 1;
-                        sseController.sendFileCompleted(repoId, chunks.get(i).getFilePath(), currentCount);
+            List<java.util.concurrent.CompletableFuture<Void>> futures = files.stream().map(file -> 
+                java.util.concurrent.CompletableFuture.runAsync(() -> {
+                    int currentIndex = processed.incrementAndGet();
+                    
+                    // SSE: File Started
+                    sseController.sendFileEvent(repoId, "indexing", file.path(), currentIndex, totalFiles);
+
+                    // DIFFERENTIAL INDEXING HOOK
+                    // TODO: Inject logic to check file hashes here.
+
+                    try {
+                        List<CodeChunk> fileChunks = buildChunks(repository, file);
+
+                        if (!fileChunks.isEmpty()) {
+                            List<List<CodeChunk>> batchesToProcess = new ArrayList<>();
+                            synchronized (sharedBuffer) {
+                                sharedBuffer.addAll(fileChunks);
+                                while (sharedBuffer.size() >= EMBEDDING_BATCH_SIZE) {
+                                    List<CodeChunk> batch = new ArrayList<>(sharedBuffer.subList(0, EMBEDDING_BATCH_SIZE));
+                                    sharedBuffer.subList(0, EMBEDDING_BATCH_SIZE).clear();
+                                    batchesToProcess.add(batch);
+                                }
+                            }
+
+                            // Process the full batches extracted
+                            for (List<CodeChunk> batch : batchesToProcess) {
+                                generateAndSaveEmbeddingsForBatch(repoId, batch);
+                            }
+                        }
+
+                        // SSE: File Completed
+                        sseController.sendFileEvent(repoId, "completed", file.path(), currentIndex, totalFiles);
+
+                    } catch (Exception e) {
+                        log.warn("Skipping file {}: {}", file.path(), e.getMessage());
+                        sseController.sendFileEvent(repoId, "completed", file.path(), currentIndex, totalFiles);
                     }
-                    int percentage = (int) (((double) processed / files.size()) * 100);
-                    sseController.sendProgress(repoId, processed, files.size(), percentage, file.path());
+                }, executor)
+            ).toList();
 
-                    log.info("Saved batch of {} chunks with embeddings for repo: {}", chunks.size(),
-                            repository.getFullName());
-                    chunks.clear();
-                }
-            }
+            // Wait for all processing to complete
+            java.util.concurrent.CompletableFuture.allOf(futures.toArray(new java.util.concurrent.CompletableFuture[0])).join();
+            executor.shutdown();
 
-            // Flush remaining chunks
-            if (!chunks.isEmpty()) {
-                generateAndSaveEmbeddingsForBatch(repoId, chunks);
-
-                for (int i = 0; i < chunks.size(); i++) {
-                    int currentCount = processed - chunks.size() + i + 1;
-                    sseController.sendFileCompleted(repoId, chunks.get(i).getFilePath(), currentCount);
-                }
-                sseController.sendProgress(repoId, processed, files.size(), 100, chunks.get(chunks.size() - 1).getFilePath());
-
-                log.info("Saved final batch of {} chunks for repo: {}", chunks.size(), repository.getFullName());
+            // Explicitly flush any trailing chunks
+            if (!sharedBuffer.isEmpty()) {
+                generateAndSaveEmbeddingsForBatch(repoId, new ArrayList<>(sharedBuffer));
+                sharedBuffer.clear();
             }
 
             // Mark as INDEXED
