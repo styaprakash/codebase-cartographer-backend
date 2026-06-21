@@ -32,4 +32,6 @@ public interface RepositoryRepository extends JpaRepository<Repository, String> 
 
     boolean existsByUserIdAndGithubRepoId(String userId, String githubRepoId);
 
+    List<Repository> findByFullName(String fullName);
+
 }

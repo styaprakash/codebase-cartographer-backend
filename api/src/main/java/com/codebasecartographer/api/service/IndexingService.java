@@ -22,6 +22,7 @@ import com.codebasecartographer.api.service.embeddingServices.EmbeddingProviderM
 import com.codebasecartographer.api.service.embeddingServices.factory.EmbeddingProviderFactory;
 import com.codebasecartographer.api.service.embeddingServices.providers.EmbeddingProvider;
 import com.codebasecartographer.api.utils.FileUtils;
+import com.codebasecartographer.api.dto.IncrementalJobPayload;
 
 import org.springframework.context.ApplicationEventPublisher;
 import java.util.zip.ZipInputStream;
@@ -233,6 +234,104 @@ public class IndexingService {
             repoService.setErrorMessage(repoId, errorMessage);
             eventPublisher.publishEvent(new IndexingStatusEvent(this, repoId, RepositoryStatus.FAILED, errorMessage));
         }
+    }
+
+    public void processIncrementalJob(IncrementalJobPayload payload) {
+        String repoId = payload.repoId();
+        log.info("Starting incremental indexing for repo: {}", repoId);
+
+        Repository repository = repositoryRepository.findById(repoId).orElse(null);
+        if (repository == null) {
+            log.warn("Repo {} not found, aborting incremental job", repoId);
+            return;
+        }
+
+        String accessToken = repository.getUser().getAccessToken();
+        String[] parts = repository.getFullName().split("/");
+        String owner = parts[0];
+        String repoName = parts[1];
+        String branch = repository.getBranch();
+
+        if (payload.removed() != null && !payload.removed().isEmpty()) {
+            codeChunkRepository.deleteChunksByRepoIdAndFilePathIn(repoId, payload.removed());
+            log.info("Deleted chunks for {} removed files", payload.removed().size());
+        }
+
+        List<String> filesToFetch = new ArrayList<>();
+        if (payload.modified() != null && !payload.modified().isEmpty()) {
+            codeChunkRepository.deleteChunksByRepoIdAndFilePathIn(repoId, payload.modified());
+            log.info("Deleted old chunks for {} modified files", payload.modified().size());
+            filesToFetch.addAll(payload.modified());
+        }
+
+        if (payload.added() != null && !payload.added().isEmpty()) {
+            filesToFetch.addAll(payload.added());
+        }
+
+        if (filesToFetch.isEmpty()) {
+            log.info("No files to fetch and embed for incremental job");
+            return;
+        }
+
+        filesToFetch = filesToFetch.stream().filter(this::isSupportedFile).toList();
+
+        int totalFiles = filesToFetch.size();
+        if (totalFiles == 0) return;
+
+        java.util.concurrent.atomic.AtomicInteger processed = new java.util.concurrent.atomic.AtomicInteger(0);
+        int threads = Math.min(20, totalFiles);
+        java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(threads);
+        List<CodeChunk> sharedBuffer = java.util.Collections.synchronizedList(new ArrayList<>());
+        List<java.util.concurrent.CompletableFuture<Void>> futures = new ArrayList<>();
+
+        for (String filePath : filesToFetch) {
+            int currentIndex = processed.incrementAndGet();
+            eventPublisher.publishEvent(new IndexingFileEvent(this, repoId, "indexing", filePath, currentIndex, totalFiles));
+
+            futures.add(java.util.concurrent.CompletableFuture.runAsync(() -> {
+                try {
+                    String content = gitHubFileService.fetchFileContent(owner, repoName, filePath, branch, accessToken);
+                    if (content == null || content.isBlank()) {
+                        eventPublisher.publishEvent(new IndexingFileEvent(this, repoId, "completed", filePath, currentIndex, totalFiles));
+                        return;
+                    }
+
+                    GitHubFileService.GithubFile file = new GitHubFileService.GithubFile(filePath, content);
+                    List<CodeChunk> fileChunks = buildChunks(repository, file);
+
+                    if (!fileChunks.isEmpty()) {
+                        List<List<CodeChunk>> batchesToProcess = new ArrayList<>();
+                        synchronized (sharedBuffer) {
+                            sharedBuffer.addAll(fileChunks);
+                            while (sharedBuffer.size() >= EMBEDDING_BATCH_SIZE) {
+                                List<CodeChunk> batch = new ArrayList<>(sharedBuffer.subList(0, EMBEDDING_BATCH_SIZE));
+                                sharedBuffer.subList(0, EMBEDDING_BATCH_SIZE).clear();
+                                batchesToProcess.add(batch);
+                            }
+                        }
+
+                        for (List<CodeChunk> batch : batchesToProcess) {
+                            generateAndSaveEmbeddingsForBatch(repoId, batch);
+                        }
+                    }
+
+                    eventPublisher.publishEvent(new IndexingFileEvent(this, repoId, "completed", filePath, currentIndex, totalFiles));
+                } catch (Exception e) {
+                    log.warn("Skipping file {}: {}", filePath, e.getMessage());
+                    eventPublisher.publishEvent(new IndexingFileEvent(this, repoId, "completed", filePath, currentIndex, totalFiles));
+                }
+            }, executor));
+        }
+
+        java.util.concurrent.CompletableFuture.allOf(futures.toArray(new java.util.concurrent.CompletableFuture[0])).join();
+        executor.shutdown();
+
+        if (!sharedBuffer.isEmpty()) {
+            generateAndSaveEmbeddingsForBatch(repoId, new ArrayList<>(sharedBuffer));
+            sharedBuffer.clear();
+        }
+
+        log.info("Incremental indexing complete for: {}", repository.getFullName());
     }
 
     private boolean isSupportedFile(String path) {

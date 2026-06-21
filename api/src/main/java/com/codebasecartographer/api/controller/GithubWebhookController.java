@@ -20,6 +20,11 @@ import org.springframework.web.bind.annotation.RestController;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import com.codebasecartographer.api.dto.IncrementalJobPayload;
+import com.codebasecartographer.api.service.DragonflyQueueService;
+import com.codebasecartographer.api.repository.RepositoryRepository;
+import com.codebasecartographer.api.entity.Repository;
+
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -28,12 +33,16 @@ import lombok.extern.slf4j.Slf4j;
 public class GithubWebhookController {
 
     private final ObjectMapper objectMapper;
+    private final DragonflyQueueService queueService;
+    private final RepositoryRepository repositoryRepository;
 
     @Value("${github.webhook.secret:defaultSecret}")
     private String webhookSecret;
 
-    public GithubWebhookController(ObjectMapper objectMapper) {
+    public GithubWebhookController(ObjectMapper objectMapper, DragonflyQueueService queueService, RepositoryRepository repositoryRepository) {
         this.objectMapper = objectMapper;
+        this.queueService = queueService;
+        this.repositoryRepository = repositoryRepository;
     }
 
     @PostMapping(value = "/push", consumes = MediaType.APPLICATION_JSON_VALUE)
@@ -75,8 +84,12 @@ public class GithubWebhookController {
             log.info("Webhook received for {}. Added: {}, Modified: {}, Removed: {}", 
                      repoFullName, added.size(), modified.size(), removed.size());
 
-            // TODO: Extract logic to an IncrementalIndexingService to handle partial updates
-            // using the 'added', 'modified', and 'removed' arrays.
+            List<Repository> repos = repositoryRepository.findByFullName(repoFullName);
+            for (Repository repo : repos) {
+                IncrementalJobPayload jobPayload = new IncrementalJobPayload(repo.getId(), added, modified, removed);
+                queueService.enqueueIncremental(objectMapper.writeValueAsString(jobPayload));
+                log.info("Enqueued incremental job for repoId: {}", repo.getId());
+            }
 
             return ResponseEntity.ok("Webhook processed");
         } catch (Exception e) {

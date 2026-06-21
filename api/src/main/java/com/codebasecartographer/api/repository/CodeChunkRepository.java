@@ -28,6 +28,11 @@ public interface CodeChunkRepository extends JpaRepository<CodeChunk, String> {
     @Query(value = "DELETE FROM code_chunks WHERE repo_id = :repoId", nativeQuery = true)
     void deleteChunksByRepoId(@Param("repoId") String repositoryId);
 
+    @Modifying
+    @Transactional
+    @Query(value = "DELETE FROM code_chunks WHERE repo_id = :repoId AND file_path IN :filePaths", nativeQuery = true)
+    void deleteChunksByRepoIdAndFilePathIn(@Param("repoId") String repositoryId, @Param("filePaths") List<String> filePaths);
+
     // countByRepository_Id → how many chunks indexed so far for a repo (used for progress tracking)
     long countByRepository_Id(String repositoryId);
 

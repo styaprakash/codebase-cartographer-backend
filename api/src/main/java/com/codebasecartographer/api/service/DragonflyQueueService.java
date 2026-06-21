@@ -32,4 +32,20 @@ public class DragonflyQueueService {
     public void complete(String repoId){
         redisTemplate.opsForList().remove(PROCESSING_QUEUE, 1, repoId);
     }
+
+    private static final String INCREMENTAL_QUEUE = "incremental-indexing-queue";
+    private static final String INCREMENTAL_PROCESSING_QUEUE = "incremental-indexing-processing-queue";
+
+    public void enqueueIncremental(String payloadJson) {
+        redisTemplate.opsForList().leftPush(INCREMENTAL_QUEUE, payloadJson);
+    }
+
+    public String dequeueIncremental() {
+        return (String)redisTemplate.opsForList().rightPopAndLeftPush(
+                INCREMENTAL_QUEUE, INCREMENTAL_PROCESSING_QUEUE, Duration.ofSeconds(2));
+    }
+
+    public void completeIncremental(String payloadJson) {
+        redisTemplate.opsForList().remove(INCREMENTAL_PROCESSING_QUEUE, 1, payloadJson);
+    }
 }

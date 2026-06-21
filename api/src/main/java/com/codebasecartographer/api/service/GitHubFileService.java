@@ -66,7 +66,7 @@ public class GitHubFileService {
     }
 
     //Fetch individual file content---------------------->
-    private String fetchFileContent(String owner, String repo, String path, String branch,String token){
+    public String fetchFileContent(String owner, String repo, String path, String branch,String token){
         try{
             JsonNode response = webClient.get()
                     .uri("/repos/{owner}/{repo}/contents/{path}?ref={branch}",
