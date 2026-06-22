@@ -1,6 +1,7 @@
 {
 	"info": {
 		"name": "Codebase Cartographer API",
+		"description": "Complete API collection for the Codebase Cartographer backend MVP.\n\nIncludes: Auth, User, Repositories, Indexing SSE, RAG Chat, Legacy Queries, Semantic Search, Graph & Files, GitHub Webhooks, and Health Check.",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
 	},
 	"variable": [
@@ -55,7 +56,7 @@
 						"header": [],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"githubId\": \"string\",\n  \"name\": \"string\",\n  \"email\": \"string\",\n  \"accessToken\": \"string\"\n}",
+							"raw": "{\n  \"githubId\": \"12345678\",\n  \"name\": \"John Doe\",\n  \"email\": \"john@example.com\",\n  \"accessToken\": \"gho_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"\n}",
 							"options": {
 								"raw": {
 									"language": "json"
@@ -168,7 +169,7 @@
 						"header": [],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"githubRepoId\": \"string\",\n  \"name\": \"string\",\n  \"fullName\": \"string\",\n  \"branch\": \"string\",\n  \"language\": \"string\"\n}",
+							"raw": "{\n  \"githubRepoId\": \"123456789\",\n  \"name\": \"my-project\",\n  \"fullName\": \"username/my-project\",\n  \"branch\": \"main\",\n  \"language\": \"Java\"\n}",
 							"options": {
 								"raw": {
 									"language": "json"
@@ -188,6 +189,15 @@
 					"request": {
 						"method": "POST",
 						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"my-project\",\n  \"fullName\": \"username/my-project\",\n  \"branch\": \"main\",\n  \"language\": \"Java\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
 						"url": {
 							"raw": "{{baseUrl}}/api/repos/{{repoId}}/index",
 							"host": ["{{baseUrl}}"],
@@ -212,16 +222,68 @@
 			]
 		},
 		{
-			"name": "Queries (RAG)",
+			"name": "Indexing SSE",
 			"item": [
 				{
-					"name": "Ask Repository Question",
+					"name": "Stream Indexing Events (SSE)",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "text/event-stream"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/repos/{{repoId}}/stream",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "repos", "{{repoId}}", "stream"]
+						},
+						"description": "Opens an SSE connection to receive real-time indexing progress events.\n\nEvent types:\n- `file_event`: Sent per-file with status, file_path, progress, total_files.\n- `status`: Sent when indexing status changes (INDEXING → INDEXED or FAILED).\n\nThe stream auto-completes when indexing finishes or fails."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "RAG Chat",
+			"item": [
+				{
+					"name": "Chat with Repository (RAG)",
 					"request": {
 						"method": "POST",
 						"header": [],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"question\": \"string\"\n}",
+							"raw": "{\n  \"query\": \"How does the authentication flow work in this project?\",\n  \"llmProvider\": \"OLLAMA_LLAMA3_1\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/chat/{{repoId}}",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "chat", "{{repoId}}"]
+						},
+						"description": "Sends a question to the RAG pipeline for a specific repository.\n\nThe `llmProvider` field selects which generative model to use. Available values:\n- OLLAMA_LLAMA3\n- OLLAMA_LLAMA3_1\n- OLLAMA_QWEN2_5\n- OLLAMA_DEEPSEEK_CODER\n- OPENAI_GPT4\n- DEEPSEEK_V4\n\nResponse includes the AI-generated answer and source file citations."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Legacy Queries",
+			"item": [
+				{
+					"name": "Ask Repository Question (Legacy)",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"question\": \"What does the RepoService do?\"\n}",
 							"options": {
 								"raw": {
 									"language": "json"
@@ -232,7 +294,8 @@
 							"raw": "{{baseUrl}}/api/repos/{{repoId}}/query",
 							"host": ["{{baseUrl}}"],
 							"path": ["api", "repos", "{{repoId}}", "query"]
-						}
+						},
+						"description": "Legacy query endpoint from QueryController. Consider using the new RAG Chat endpoint (POST /api/chat/{repoId}) instead."
 					},
 					"response": []
 				},
@@ -246,6 +309,34 @@
 							"host": ["{{baseUrl}}"],
 							"path": ["api", "repos", "{{repoId}}", "queries"]
 						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Semantic Search",
+			"item": [
+				{
+					"name": "Search Code Chunks",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"query\": \"authentication filter\",\n  \"threshold\": 0.7,\n  \"limit\": 10\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/repos/{{repoId}}/search",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "repos", "{{repoId}}", "search"]
+						},
+						"description": "Performs a semantic similarity search on indexed code chunks.\n\n- `query`: The natural language search query.\n- `threshold`: Minimum cosine similarity score (default 0.7).\n- `limit`: Max number of results (default 10)."
 					},
 					"response": []
 				}
@@ -277,6 +368,47 @@
 							"host": ["{{baseUrl}}"],
 							"path": ["api", "repos", "{{repoId}}", "files"]
 						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "GitHub Webhooks",
+			"item": [
+				{
+					"name": "Handle Push Event",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "X-Hub-Signature-256",
+								"value": "sha256=<computed_hmac_hex>",
+								"description": "HMAC-SHA256 signature of the payload using the webhook secret. Required for signature verification."
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"ref\": \"refs/heads/main\",\n  \"repository\": {\n    \"full_name\": \"username/my-project\",\n    \"default_branch\": \"main\"\n  },\n  \"commits\": [\n    {\n      \"id\": \"abc123def456\",\n      \"message\": \"feat: add new search feature\",\n      \"added\": [\"src/main/java/NewFile.java\"],\n      \"modified\": [\"src/main/java/ExistingFile.java\"],\n      \"removed\": [\"src/main/java/OldFile.java\"]\n    }\n  ]\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/webhooks/github/push",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "webhooks", "github", "push"]
+						},
+						"auth": {
+							"type": "noauth"
+						},
+						"description": "Receives GitHub push webhook events for incremental re-indexing.\n\nRequires:\n- `X-Hub-Signature-256` header with HMAC-SHA256 signature.\n- Push must be to the repository's default branch to be processed.\n\nThe controller extracts added/modified/removed files from the commits array and enqueues an incremental indexing job."
 					},
 					"response": []
 				}

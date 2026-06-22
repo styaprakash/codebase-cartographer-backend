@@ -75,3 +75,11 @@ resilience4j:
           - org.springframework.web.client.HttpClientErrorException.TooManyRequests
           - org.springframework.web.client.HttpServerErrorException
           - io.github.resilience4j.ratelimiter.RequestNotPermitted
+
+# LLM API Keys — override via environment variables in production
+deepseek:
+  api-key: ${DEEPSEEK_API_KEY}
+
+openai:
+  api:
+    key: ${OPENAI_API_KEY:your-openai-api-key-here}
