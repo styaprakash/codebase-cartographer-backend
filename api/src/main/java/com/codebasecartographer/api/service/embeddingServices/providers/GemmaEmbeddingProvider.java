@@ -8,6 +8,8 @@ import com.codebasecartographer.api.dto.request.EmbeddingRequest;
 import com.codebasecartographer.api.dto.response.EmbeddingResponse;
 import com.codebasecartographer.api.enums.EmbeddingModel;
 
+import io.github.resilience4j.bulkhead.annotation.Bulkhead;
+
 // Not @Component — this provider is disabled until the Gemma model is pulled.
 // Enable by adding @Component and setting EMBEDDING_GEMMA.enabled = true.
 public class GemmaEmbeddingProvider implements EmbeddingProvider {
@@ -25,6 +27,9 @@ public class GemmaEmbeddingProvider implements EmbeddingProvider {
     }
 
     @Override
+    // Bulkhead limits concurrent calls to the Local Ollama instance.
+    // Annotated on both embed and embedBatch to ensure AOP proxies intercept external calls to either method.
+    @Bulkhead(name = "local-ollama")
     public List<float[]> embedBatch(List<String> texts) {
         EmbeddingModel model = getModel();
         EmbeddingResponse response = restClient.post()
@@ -37,6 +42,9 @@ public class GemmaEmbeddingProvider implements EmbeddingProvider {
     }
 
     @Override
+    // Bulkhead limits concurrent calls to the Local Ollama instance.
+    // Annotated on both embed and embedBatch to ensure AOP proxies intercept external calls to either method.
+    @Bulkhead(name = "local-ollama")
     public float[] embed(String text) {
         // TODO Auto-generated method stub
         throw new UnsupportedOperationException("Unimplemented method 'embed'");

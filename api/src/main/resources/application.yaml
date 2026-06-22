@@ -45,3 +45,33 @@ allowed:
 jwt:
   secret: "codebase-cartographer-secret-key-must-be-at-least-256-bits-long-for-hs256"
   expiration: 86400000  # 24 hours in milliseconds
+
+# Resilience4j Configurations for Embedding Providers
+resilience4j:
+  ratelimiter:
+    instances:
+      # Premium API limit: Max 50 requests every 1 second
+      premium-api:
+        limitForPeriod: 50
+        limitRefreshPeriod: 1s
+        timeoutDuration: 5s # Wait up to 5s to acquire a permit before failing
+  bulkhead:
+    instances:
+      # Local Ollama limit: Restrict to 4 concurrent GPU executions
+      local-ollama:
+        maxConcurrentCalls: 4
+        # Wait patiently in queue for up to 60s if all 4 slots are occupied
+        maxWaitDuration: 60s
+  retry:
+    instances:
+      # Premium API Retry: Exponential backoff for rate limits and server errors
+      premium-api:
+        maxAttempts: 3
+        waitDuration: 2s
+        enableExponentialBackoff: true
+        exponentialBackoffMultiplier: 2 # Wait 2s, then 4s, then 8s
+        retryExceptions:
+          # Only retry on 429 Too Many Requests, 5xx errors, and local rate limiter queue full
+          - org.springframework.web.client.HttpClientErrorException.TooManyRequests
+          - org.springframework.web.client.HttpServerErrorException
+          - io.github.resilience4j.ratelimiter.RequestNotPermitted

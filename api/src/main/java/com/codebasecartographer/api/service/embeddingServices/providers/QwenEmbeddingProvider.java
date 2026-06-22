@@ -9,6 +9,8 @@ import com.codebasecartographer.api.dto.request.EmbeddingRequest;
 import com.codebasecartographer.api.dto.response.EmbeddingResponse;
 import com.codebasecartographer.api.enums.EmbeddingModel;
 
+import io.github.resilience4j.bulkhead.annotation.Bulkhead;
+
 @Component
 public class QwenEmbeddingProvider implements EmbeddingProvider {
     private final RestClient restClient;
@@ -26,12 +28,18 @@ public class QwenEmbeddingProvider implements EmbeddingProvider {
 
     // Single text embedding (uses batch with single item)
     @Override
+    // Bulkhead limits concurrent calls to the Local Ollama instance.
+    // Annotated on both embed and embedBatch to ensure AOP proxies intercept external calls to either method.
+    @Bulkhead(name = "local-ollama")
     public float[] embed(String text) {
         return embedBatch(List.of(text)).get(0);
     }
 
     // Batch embedding
     @Override
+    // Bulkhead limits concurrent calls to the Local Ollama instance.
+    // Annotated on both embed and embedBatch to ensure AOP proxies intercept external calls to either method.
+    @Bulkhead(name = "local-ollama")
     public List<float[]> embedBatch(List<String> texts) {
         EmbeddingModel model = getModel();
         EmbeddingResponse response = restClient.post()
