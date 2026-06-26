@@ -20,28 +20,88 @@ import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @RestController
-@RequestMapping("/api/repos")
+@RequestMapping("/api/sse")
 public class IndexingSSEController {
 
     private final Map<String, SseEmitter> emitters = new ConcurrentHashMap<>();
+    private final com.codebasecartographer.api.repository.RepositoryRepository repositoryRepository;
+
+    public IndexingSSEController(com.codebasecartographer.api.repository.RepositoryRepository repositoryRepository) {
+        this.repositoryRepository = repositoryRepository;
+    }
 
     @SuppressWarnings("null")
-    @GetMapping(value = "/{repoId}/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter stream(@PathVariable String repoId) {
-        SseEmitter emitter = new SseEmitter(3600000L); // 1 hour timeout
-        emitters.put(repoId, emitter);
+    @GetMapping(value = "/indexing/{repoId}", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter stream(@PathVariable String repoId, jakarta.servlet.http.HttpServletResponse response) {
+        response.setHeader("Cache-Control", "no-cache");
+        response.setHeader("X-Accel-Buffering", "no");
+        response.setHeader("Connection", "keep-alive");
+        
+        log.info("Received SSE connection request for repo: {}", repoId);
+        try {
+            if (repoId == null) {
+                log.error("Failed to establish SSE connection: repoId is null");
+                throw new IllegalArgumentException("repoId cannot be null");
+            }
+            
+            SseEmitter emitter = new SseEmitter(Long.MAX_VALUE); // Infinite timeout
+            emitters.put(repoId, emitter);
+            
+            // Immediately flush connection to prevent Next.js proxy timeout
+            emitter.send(SseEmitter.event().name("connected").data("Stream opened successfully"));
 
-        emitter.onCompletion(() -> emitters.remove(repoId));
-        emitter.onTimeout(() -> {
-            emitter.complete();
-            emitters.remove(repoId);
-        });
-        emitter.onError((e) -> {
-            emitter.completeWithError(e);
-            emitters.remove(repoId);
-        });
+            // Best Practice: Check the database immediately upon connection to prevent race conditions
+            // where the background job finishes before the frontend establishes the SSE connection.
+            java.util.Optional<com.codebasecartographer.api.entity.Repository> optRepo = repositoryRepository.findById(repoId);
+            if (optRepo.isPresent()) {
+                com.codebasecartographer.api.entity.Repository repo = optRepo.get();
+                if (repo.getStatus() == RepositoryStatus.INDEXED || repo.getStatus() == RepositoryStatus.FAILED) {
+                    // Schedule sending the terminal event on a separate thread to ensure
+                    // Spring MVC has time to return the emitter and write the HTTP 200 OK headers first.
+                    java.util.concurrent.CompletableFuture.runAsync(() -> {
+                        try {
+                            Thread.sleep(100);
+                            Map<String, Object> data = new java.util.HashMap<>();
+                            data.put("status", repo.getStatus().name());
+                            if (repo.getErrorMessage() != null) {
+                                data.put("errorMessage", repo.getErrorMessage());
+                            }
+                            emitter.send(SseEmitter.event().name("status").data(data));
+                            emitter.complete();
+                        } catch (Exception e) {
+                            log.error("Failed to send terminal event for repo {}", repoId, e);
+                        }
+                    });
+                    return emitter;
+                }
+            }
 
-        return emitter;
+            emitter.onCompletion(() -> {
+                log.info("SSE connection completed for repo: {}", repoId);
+                emitters.remove(repoId);
+            });
+            emitter.onTimeout(() -> {
+                log.warn("SSE connection timed out for repo: {}", repoId);
+                emitter.complete();
+                emitters.remove(repoId);
+            });
+            emitter.onError((e) -> {
+                // When a client disconnects (e.g., closing the browser or React unmounts),
+                // an IOException (Broken Pipe) is thrown. If we call emitter.completeWithError(e),
+                // Spring treats it as an application crash and tries to forward to the /error page.
+                // Since the response is already committed (HTTP 200 OK SSE headers sent), this causes
+                // the "Cannot render error page" spam in the console. 
+                // We simply log it at debug level and remove the emitter.
+                log.debug("SSE client disconnected or network error for repo: {}", repoId);
+                emitters.remove(repoId);
+            });
+
+            log.info("Successfully established SSE connection for repo: {}", repoId);
+            return emitter;
+        } catch (Exception e) {
+            log.error("Failed to establish SSE connection for repo: {}", repoId, e);
+            throw new RuntimeException(e);
+        }
     }
 
     @EventListener
@@ -50,6 +110,8 @@ public class IndexingSSEController {
         if (emitter != null) {
             synchronized (emitter) {
                 try {
+                    log.debug("Sending SSE file_event to frontend for repoId={}, filePath={}, progress={}/{}", 
+                        event.getRepoId(), event.getFilePath(), event.getProgress(), event.getTotalFiles());
                     emitter.send(SseEmitter.event()
                             .name("file_event")
                             .data(Map.of(
@@ -73,10 +135,11 @@ public class IndexingSSEController {
             synchronized (emitter) {
                 try {
                     Map<String, Object> data = new java.util.HashMap<>();
-                    data.put("status", event.getStatus());
+                    data.put("status", event.getStatus().name());
                     if (event.getErrorMessage() != null) {
                         data.put("errorMessage", event.getErrorMessage());
                     }
+                    log.debug("Sending SSE status event to frontend for repoId={}, status={}", event.getRepoId(), event.getStatus());
                     emitter.send(SseEmitter.event()
                             .name("status")
                             .data(data));

@@ -145,11 +145,37 @@ public class GlobalExceptionHandler {
         return problem;
     }
 
+    // ── External API Errors ───────────────────────────────────────
+    // This handler catches our custom GithubApiException thrown during the Zip download
+    // or any other GitHub API interactions. It gracefully maps GitHub's native HTTP status
+    // codes (like 400 Bad Request or 404 Not Found) into our standardized ProblemDetail
+    // format. This prevents the Spring framework from treating the failure as an unhandled
+    // exception, which would sever the SSE stream and return an opaque 500 Internal Server Error.
+    @ExceptionHandler(com.codebasecartographer.api.exception.GithubApiException.class)
+    public ProblemDetail handleGithubApi(com.codebasecartographer.api.exception.GithubApiException ex){
+        log.error("GitHub API error: {}", ex.getMessage());
+        
+        // Map GitHub's status code to the closest Spring HttpStatus equivalent
+        HttpStatus status = HttpStatus.BAD_GATEWAY; // Default to 502 (Bad Gateway) if unknown
+        if (ex.getStatusCode() == 400) status = HttpStatus.BAD_REQUEST;
+        else if (ex.getStatusCode() == 401 || ex.getStatusCode() == 403) status = HttpStatus.UNAUTHORIZED;
+        else if (ex.getStatusCode() == 404) status = HttpStatus.NOT_FOUND;
+        
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, ex.getMessage());
+        problem.setTitle("GitHub Integration Error");
+        problem.setType(URI.create("https://codebasecartographer.com/errors/github-api"));
+        problem.setProperty("timestamp", LocalDateTime.now());
+        // Pass along the original GitHub status code to the frontend for precise debugging
+        problem.setProperty("githubStatusCode", ex.getStatusCode());
+
+        return problem;
+    }
+
     // ── 500 Internal Server Error ─────────────────────────────────
     // Safety net — catches anything unhandled
-    @ExceptionHandler(Exception.class)
-    public ProblemDetail handleGeneral(Exception ex) {
-        log.error("Unhandled exception occurred", ex);
+    @ExceptionHandler(Throwable.class)
+    public ProblemDetail handleGeneral(Throwable ex) {
+        log.error("Unhandled global exception", ex);
 
         ProblemDetail problem = ProblemDetail
             .forStatusAndDetail(HttpStatus.INTERNAL_SERVER_ERROR,

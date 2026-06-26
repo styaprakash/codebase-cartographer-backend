@@ -27,8 +27,6 @@ public class SecurityConfig {
         this.jwtAuthFilter = jwtAuthFilter;
     }
     
-    @Autowired CustomCorsConfiguration customCorsConfiguration;
-    
     @Bean
     public AuthenticationEntryPoint authenticationEntryPoint() {
         return (request, response, authException) -> {
@@ -42,7 +40,7 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http 
-            .cors(cors -> cors.configurationSource(customCorsConfiguration))
+            .cors(org.springframework.security.config.Customizer.withDefaults())
             .csrf(csrf -> csrf.disable()) // Disable CSRF for now
             .sessionManagement(session -> session
                 .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
@@ -53,8 +51,8 @@ public class SecurityConfig {
             )
             
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/api/auth/**") // All auth endpoints public
-                .permitAll()
+                .requestMatchers("/api/auth/**").permitAll() // All auth endpoints public
+                .requestMatchers("/error").permitAll()       // Let Spring handle errors gracefully
                 .anyRequest().authenticated()
             )
 

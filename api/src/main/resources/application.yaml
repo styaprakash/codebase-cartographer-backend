@@ -10,7 +10,7 @@ spring:
   flyway:
     enabled: true
     baseline-on-migrate: true
-    out-of-order: false
+    out-of-order: true
     table: flyway_schema_history
   datasource:
     url: jdbc:postgresql://localhost:5432/cartographer
@@ -34,7 +34,7 @@ spring:
   data:
     redis:
       host: localhost
-      port: 6379
+      port: 6380
       timeout: 2000ms
       client-type: lettuce
 
@@ -78,7 +78,7 @@ resilience4j:
 
 # LLM API Keys — override via environment variables in production
 deepseek:
-  api-key: ${DEEPSEEK_API_KEY}
+  api-key: ${DEEPSEEK_API_KEY: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}
 
 openai:
   api:

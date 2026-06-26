@@ -21,7 +21,7 @@ import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @Component
-@DependsOn({"redisConnectionFactory", "dragonflyQueueService"})
+@DependsOn({ "redisConnectionFactory", "dragonflyQueueService" })
 public class IndexingWorker {
     private final DragonflyQueueService dragonflyQueueService;
     private final IndexingService indexingService;
@@ -77,7 +77,8 @@ public class IndexingWorker {
                                             total,
                                             embedded);
                                     if (repo != null && repo.getEmbeddingModel() == null) {
-                                        log.error("Repo {} has chunks but no embedding model assigned. Skipping self-heal.",
+                                        log.error(
+                                                "Repo {} has chunks but no embedding model assigned. Skipping self-heal.",
                                                 repoId);
                                         repoService.setErrorMessage(repoId,
                                                 "Cannot self-heal: no embedding model assigned");
@@ -110,19 +111,48 @@ public class IndexingWorker {
                                 } else {
                                     indexingService.processIndexingJob(repoId);
                                 }
+                            } catch (Throwable t) {
+                                // CATCH THROWABLE, NOT EXCEPTION!
+                                // UnsatisfiedLinkError and OutOfMemoryError are java.lang.Error
+                                // subclasses that silently kill threads if only Exception is caught.
+                                // This ensures the error is logged and the repo status is marked FAILED.
+                                log.error("SEVERE: Worker thread crashed for repo {} (possible JVM Error)", repoId, t);
+                                try {
+                                    repoService.updateStatus(repoId, RepositoryStatus.FAILED);
+                                    repoService.setErrorMessage(repoId, "Worker crash: " + t.getMessage());
+                                } catch (Exception statusEx) {
+                                    log.error("Failed to update repo status after crash", statusEx);
+                                }
                             } finally {
                                 dragonflyQueueService.complete(repoId);
                             }
                         });
                     }
                 } catch (IllegalStateException ex) {
-                    if (ex.getMessage() != null && (ex.getMessage().contains("destroyed") || ex.getMessage().contains("STOPPED"))) {
+                    if (ex.getMessage() != null && (ex.getMessage().contains("destroyed")
+                            || ex.getMessage().contains("STOPPED") || ex.getMessage().contains("STOPPING"))) {
                         log.info("Redis connection destroyed or stopped, stopping worker");
                         break;
                     }
                     log.error("Worker error", ex);
                 } catch (Exception ex) {
-                    log.error("Worker error", ex);
+                    if (ex.getMessage() != null && ex.getMessage().contains("Connection closed")) {
+                        log.info("Redis connection closed, stopping worker");
+                        break;
+                    }
+                    if (ex.getCause() != null && ex.getCause().getMessage() != null
+                            && ex.getCause().getMessage().contains("Connection closed")) {
+                        log.info("Redis connection closed, stopping worker");
+                        break;
+                    }
+                    
+                    if (ex instanceof org.springframework.dao.QueryTimeoutException) {
+                        // Expected when BRPOPLPUSH blocking duration exceeds Lettuce's default command timeout.
+                        // Treat it as an empty queue and just loop again.
+                        continue;
+                    }
+                    
+                    log.error("Failed at Indexing Worker loop (possible queue or DB connection error)", ex);
                 }
             }
             log.info("Indexing Worker stopped");

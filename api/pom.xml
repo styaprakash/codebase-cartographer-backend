@@ -106,11 +106,10 @@
 			<groupId>org.flywaydb</groupId>
 			<artifactId>flyway-core</artifactId>
 		</dependency>
-		<dependency>
-			<groupId>ch.usi.si.seart</groupId>
-			<artifactId>java-tree-sitter</artifactId>
-			<version>1.12.0</version>
-		</dependency>
+		<!-- Tree-Sitter REMOVED: native JNI library (libjava-tree-sitter.so) caused
+		     UnsatisfiedLinkError on non-glibc systems, silently killing worker threads.
+		     Replaced with pure Java RecursiveTextSplitter. -->
+
 		<dependency>
 			<groupId>org.flywaydb</groupId>
 			<artifactId>flyway-database-postgresql</artifactId>

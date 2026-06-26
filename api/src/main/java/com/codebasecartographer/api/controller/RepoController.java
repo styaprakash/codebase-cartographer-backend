@@ -96,4 +96,14 @@ public class RepoController extends BaseController {
         return indexingService.getIndexingStatus(userId, id);
     }
 
+    // POST /api/repos/{id}/reset-status
+    @PostMapping("/repos/{id}/reset-status")
+    public RepoResponse resetStatus(@PathVariable("id") String id) {
+        String userId = getCurrentUserId();
+        // Verify repo belongs to user
+        repoService.getRepoById(userId, id);
+        repoService.updateStatus(id, com.codebasecartographer.api.enums.RepositoryStatus.NOT_INDEXED);
+        return repoService.getRepoById(userId, id);
+    }
+
 }

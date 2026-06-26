@@ -25,7 +25,7 @@ public class DragonflyQueueService {
     //Pull the job from queue using the Reliable Queue Pattern (BRPOPLPUSH)
     public String dequeue(){
         return (String)redisTemplate.opsForList().rightPopAndLeftPush(
-                INDEXING_QUEUE, PROCESSING_QUEUE, Duration.ofSeconds(2));
+                INDEXING_QUEUE, PROCESSING_QUEUE, Duration.ofSeconds(1));
     } 
 
     //Remove the job from the processing queue once complete
@@ -42,7 +42,7 @@ public class DragonflyQueueService {
 
     public String dequeueIncremental() {
         return (String)redisTemplate.opsForList().rightPopAndLeftPush(
-                INCREMENTAL_QUEUE, INCREMENTAL_PROCESSING_QUEUE, Duration.ofSeconds(2));
+                INCREMENTAL_QUEUE, INCREMENTAL_PROCESSING_QUEUE, Duration.ofSeconds(1));
     }
 
     public void completeIncremental(String payloadJson) {

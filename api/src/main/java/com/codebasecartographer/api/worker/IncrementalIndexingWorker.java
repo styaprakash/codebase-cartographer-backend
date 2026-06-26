@@ -59,13 +59,28 @@ public class IncrementalIndexingWorker {
                         });
                     }
                 } catch (IllegalStateException ex) {
-                    if (ex.getMessage() != null && (ex.getMessage().contains("destroyed") || ex.getMessage().contains("STOPPED"))) {
+                    if (ex.getMessage() != null && (ex.getMessage().contains("destroyed") || ex.getMessage().contains("STOPPED") || ex.getMessage().contains("STOPPING"))) {
                         log.info("Redis connection destroyed or stopped, stopping worker");
                         break;
                     }
                     log.error("Worker error", ex);
                 } catch (Exception ex) {
-                    log.error("Worker error", ex);
+                    if (ex.getMessage() != null && ex.getMessage().contains("Connection closed")) {
+                        log.info("Redis connection closed, stopping worker");
+                        break;
+                    }
+                    if (ex.getCause() != null && ex.getCause().getMessage() != null && ex.getCause().getMessage().contains("Connection closed")) {
+                        log.info("Redis connection closed, stopping worker");
+                        break;
+                    }
+                    
+                    if (ex instanceof org.springframework.dao.QueryTimeoutException) {
+                        // Expected when BRPOPLPUSH blocking duration exceeds Lettuce's default command timeout.
+                        // Treat it as an empty queue and just loop again.
+                        continue;
+                    }
+                    
+                    log.error("Failed at Indexing Worker loop (possible queue or DB connection error)", ex);
                 }
             }
             log.info("Incremental Indexing Worker stopped");

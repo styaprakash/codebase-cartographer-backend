@@ -50,7 +50,9 @@ public class IndexingService {
     private final EmbeddingModelSelector modelSelector;
     private final EmbeddingProviderMetrics providerMetrics;
     private final ApplicationEventPublisher eventPublisher;
-    private final InProcessASTChunkingService inProcessASTChunkingService;
+    // Pure Java text splitter — replaces the native Tree-Sitter JNI library
+    // that was causing UnsatisfiedLinkError crashes on non-glibc systems
+    private final RecursiveTextSplitter recursiveTextSplitter;
 
     private static final int EMBEDDING_BATCH_SIZE = 20; // Adjust based on Ollama's limits
 
@@ -63,7 +65,7 @@ public class IndexingService {
             EmbeddingModelSelector modelSelector,
             EmbeddingProviderMetrics providerMetrics,
             ApplicationEventPublisher eventPublisher,
-            InProcessASTChunkingService inProcessASTChunkingService) {
+            RecursiveTextSplitter recursiveTextSplitter) {
         this.repositoryRepository = repositoryRepository;
         this.codeChunkRepository = codeChunkRepository;
         this.repoService = repoService;
@@ -73,7 +75,7 @@ public class IndexingService {
         this.modelSelector = modelSelector;
         this.providerMetrics = providerMetrics;
         this.eventPublisher = eventPublisher;
-        this.inProcessASTChunkingService = inProcessASTChunkingService;
+        this.recursiveTextSplitter = recursiveTextSplitter;
     }
 
     // Called when user clicks "Index repo" on dashboard
@@ -86,7 +88,9 @@ public class IndexingService {
         Repository repo = repositoryRepository.findById(repoId)
                 .orElseThrow(() -> new ResourceNotFoundException("Repository", "id", repoId));
         RepositoryStatus current = repo.getStatus();
+        log.info("Trigger POST request received for repoId={}. Status is currently: {}. Proceeding...", repoId, current);
         if (current == RepositoryStatus.PENDING || current == RepositoryStatus.INDEXING) {
+            log.warn("Status is stuck on {}. Rejecting...", current);
             throw new ConflictException("Repository is already queued or being indexed.");
         }
 
@@ -131,35 +135,70 @@ public class IndexingService {
 
         String accessToken = repository.getUser().getAccessToken();
         String[] parts = repository.getFullName().split("/");
-        String owner = parts[0];
-        String repoName = parts[1];
+        String owner = parts[0].trim();
+        String repoName = parts[1].trim();
         String branch = repository.getBranch();
 
         try {
             log.info("Fetching zipball from GitHub for: {}", repository.getFullName());
+            log.info("Starting HTTP call to GitHub Archive API for zipball: {}/{}", owner, repoName);
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create("https://api.github.com/repos/" + owner + "/" + repoName + "/zipball/" + branch))
+                    .uri(URI.create("https://api.github.com/repos/" + owner + "/" + repoName + "/zipball"))
                     .header("Authorization", "Bearer " + accessToken)
-                    .header("Accept", "application/vnd.github+json")
+                    .header("Accept", "application/vnd.github.v3+json")
+                    .header("User-Agent", "Codebase-Cartographer")
                     .GET()
                     .build();
 
-            HttpResponse<InputStream> response = HttpClient.newBuilder()
-                    .followRedirects(HttpClient.Redirect.NORMAL)
-                    .build()
-                    .send(request, HttpResponse.BodyHandlers.ofInputStream());
+            // 1. Initial Request
+            // We MUST include the Authorization header here because we are hitting api.github.com.
+            // We set followRedirects(NEVER) because GitHub will return a 302 redirect to a different
+            // domain (like codeload.github.com). If the Java HttpClient automatically follows this
+            // redirect, it will send the Authorization header to the new domain, which causes a 400 Bad Request.
+            HttpClient client = HttpClient.newBuilder()
+                    .followRedirects(HttpClient.Redirect.NEVER) // Manually handle redirects to avoid leaking tokens
+                    .build();
 
-            if (response.statusCode() != 200) {
-                throw new RuntimeException("Failed to fetch zipball, status: " + response.statusCode());
+            HttpResponse<InputStream> response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            log.info("HTTP Status Code returned from GitHub (Step 1): {}", response.statusCode());
+
+            // 2. Handle Redirect
+            if (response.statusCode() == 301 || response.statusCode() == 302 || response.statusCode() == 307) {
+                // Extract the new URL from the Location header
+                final int redirectCode = response.statusCode(); // Save to final var for lambda capture
+                String location = response.headers().firstValue("Location")
+                        .orElseThrow(() -> new com.codebasecartographer.api.exception.GithubApiException("Redirect missing Location header", redirectCode));
+                
+                log.info("Handling GitHub redirect to: {}", location);
+                // We must close the old input stream to prevent connection leaks
+                response.body().close(); 
+
+                // 3. Second Request (The Hop)
+                // We build a NEW request to the redirected URL.
+                // CRUCIAL: We do NOT include the Authorization header here.
+                // The redirected URL contains temporary embedded credentials in its query string.
+                HttpRequest redirectRequest = HttpRequest.newBuilder()
+                        .uri(URI.create(location))
+                        // STRICTLY NO Authorization header here!
+                        .header("Accept", "application/vnd.github.v3+json")
+                        .header("User-Agent", "Codebase-Cartographer")
+                        .GET()
+                        .build();
+
+                response = client.send(redirectRequest, HttpResponse.BodyHandlers.ofInputStream());
+                log.info("HTTP Status Code returned from redirect (Step 2): {}", response.statusCode());
             }
 
-            int threads = 20;
-            java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(threads);
-            List<CodeChunk> sharedBuffer = java.util.Collections.synchronizedList(new ArrayList<>());
-            List<java.util.concurrent.CompletableFuture<Void>> futures = new ArrayList<>();
+            if (response.statusCode() != 200) {
+                log.error("Failed at Zip Download: GitHub API returned status {}", response.statusCode());
+                if (response.statusCode() == 400) {
+                    throw new com.codebasecartographer.api.exception.GithubApiException("Repository is empty or un-downloadable (GitHub 400)", 400);
+                }
+                throw new com.codebasecartographer.api.exception.GithubApiException("Failed to fetch zipball, GitHub returned status: " + response.statusCode(), response.statusCode());
+            }
 
-            java.util.concurrent.atomic.AtomicInteger processed = new java.util.concurrent.atomic.AtomicInteger(0);
-
+            // 1. First Pass: Collect all supported files to determine totalFiles
+            List<GitHubFileService.GithubFile> filesToProcess = new ArrayList<>();
             try (ZipInputStream zis = new ZipInputStream(response.body())) {
                 ZipEntry entry;
                 while ((entry = zis.getNextEntry()) != null) {
@@ -178,42 +217,69 @@ public class IndexingService {
 
                     byte[] contentBytes = zis.readAllBytes();
                     String content = new String(contentBytes, StandardCharsets.UTF_8);
+                    filesToProcess.add(new GitHubFileService.GithubFile(path, content));
+                }
+            }
 
-                    final String filePath = path;
-                    final GitHubFileService.GithubFile file = new GitHubFileService.GithubFile(filePath, content);
+            final int totalFiles = filesToProcess.size();
+            repoService.updateProgress(repoId, 0, totalFiles);
 
-                    int currentIndex = processed.incrementAndGet();
-                    
-                    eventPublisher.publishEvent(new IndexingFileEvent(this, repoId, "indexing", filePath, currentIndex, 0));
+            // 2. Empty Repo Check
+            if (totalFiles == 0) {
+                repoService.setErrorMessage(repoId, "No supported files found.");
+                eventPublisher.publishEvent(new IndexingStatusEvent(this, repoId, 
+                    RepositoryStatus.FAILED, "No supported files found."));
+                return;
+            }
 
-                    futures.add(java.util.concurrent.CompletableFuture.runAsync(() -> {
-                        try {
-                            List<CodeChunk> fileChunks = buildChunks(repository, file);
+            // 3. Second Pass: Process files in parallel
+            int threads = 20;
+            java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(threads);
+            List<CodeChunk> sharedBuffer = java.util.Collections.synchronizedList(new ArrayList<>());
+            List<java.util.concurrent.CompletableFuture<Void>> futures = new ArrayList<>();
 
-                            if (!fileChunks.isEmpty()) {
-                                List<List<CodeChunk>> batchesToProcess = new ArrayList<>();
-                                synchronized (sharedBuffer) {
-                                    sharedBuffer.addAll(fileChunks);
-                                    while (sharedBuffer.size() >= EMBEDDING_BATCH_SIZE) {
-                                        List<CodeChunk> batch = new ArrayList<>(sharedBuffer.subList(0, EMBEDDING_BATCH_SIZE));
-                                        sharedBuffer.subList(0, EMBEDDING_BATCH_SIZE).clear();
-                                        batchesToProcess.add(batch);
-                                    }
-                                }
+            java.util.concurrent.atomic.AtomicInteger submitted = new java.util.concurrent.atomic.AtomicInteger(0);
+            java.util.concurrent.atomic.AtomicInteger processed = new java.util.concurrent.atomic.AtomicInteger(0);
 
-                                for (List<CodeChunk> batch : batchesToProcess) {
-                                    generateAndSaveEmbeddingsForBatch(repoId, batch);
+            for (GitHubFileService.GithubFile file : filesToProcess) {
+                final String filePath = file.path();
+                int currentIndex = submitted.incrementAndGet();
+                
+                eventPublisher.publishEvent(new IndexingFileEvent(this, repoId, "indexing", filePath, currentIndex, totalFiles));
+
+                // Submit file processing to the thread pool for parallel execution
+                futures.add(java.util.concurrent.CompletableFuture.runAsync(() -> {
+                    try {
+                        List<CodeChunk> fileChunks = buildChunks(repository, file);
+
+                        if (!fileChunks.isEmpty()) {
+                            List<List<CodeChunk>> batchesToProcess = new ArrayList<>();
+                            synchronized (sharedBuffer) {
+                                sharedBuffer.addAll(fileChunks);
+                                while (sharedBuffer.size() >= EMBEDDING_BATCH_SIZE) {
+                                    List<CodeChunk> batch = new ArrayList<>(sharedBuffer.subList(0, EMBEDDING_BATCH_SIZE));
+                                    sharedBuffer.subList(0, EMBEDDING_BATCH_SIZE).clear();
+                                    batchesToProcess.add(batch);
                                 }
                             }
 
-                            eventPublisher.publishEvent(new IndexingFileEvent(this, repoId, "completed", filePath, currentIndex, 0));
-
-                        } catch (Exception e) {
-                            log.warn("Skipping file {}: {}", filePath, e.getMessage());
-                            eventPublisher.publishEvent(new IndexingFileEvent(this, repoId, "completed", filePath, currentIndex, 0));
+                            for (List<CodeChunk> batch : batchesToProcess) {
+                                generateAndSaveEmbeddingsForBatch(repoId, batch);
+                            }
                         }
-                    }, executor));
-                }
+                    } catch (Throwable t) {
+                        // CATCH THROWABLE, NOT EXCEPTION!
+                        // UnsatisfiedLinkError, OutOfMemoryError, StackOverflowError are all
+                        // java.lang.Error subclasses that bypass catch(Exception). Catching
+                        // Throwable ensures the thread doesn't die silently, which would
+                        // cause the SSE stream to hang indefinitely.
+                        log.error("SEVERE: Failed processing file {} (possible JVM Error)", filePath, t);
+                    } finally {
+                        int completedCount = processed.incrementAndGet();
+                        repoService.updateProgress(repoId, completedCount, totalFiles);
+                        eventPublisher.publishEvent(new IndexingFileEvent(this, repoId, "completed", filePath, completedCount, totalFiles));
+                    }
+                }, executor));
             }
 
             java.util.concurrent.CompletableFuture.allOf(futures.toArray(new java.util.concurrent.CompletableFuture[0])).join();
@@ -224,13 +290,17 @@ public class IndexingService {
                 sharedBuffer.clear();
             }
 
+            // 4. Final Progress Update
+            repoService.updateProgress(repoId, totalFiles, totalFiles);
             repoService.updateStatus(repoId, RepositoryStatus.INDEXED);
             eventPublisher.publishEvent(new IndexingStatusEvent(this, repoId, RepositoryStatus.INDEXED, null));
             log.info("Indexing complete for: {}", repository.getFullName());
 
-        } catch (Exception e) {
-            log.error("Indexing failed for repo: {}", repoId, e);
-            String errorMessage = determineErrorMessage(e);
+        } catch (Throwable t) {
+            // Catch Throwable to handle JVM-level Errors (UnsatisfiedLinkError, OOM, etc.)
+            // that would otherwise kill the thread silently and leave the repo stuck on INDEXING
+            log.error("Indexing failed for repo: {}", repoId, t);
+            String errorMessage = determineErrorMessage(t);
             repoService.setErrorMessage(repoId, errorMessage);
             eventPublisher.publishEvent(new IndexingStatusEvent(this, repoId, RepositoryStatus.FAILED, errorMessage));
         }
@@ -344,7 +414,9 @@ public class IndexingService {
 
     private List<CodeChunk> buildChunks(Repository repo, GithubFile file) {
         ProgrammingLanguage language = ProgrammingLanguage.fromExtension(file.path());
-        List<ASTChunk> astChunks = inProcessASTChunkingService.chunkCode(file.content(), language);
+        // Use the pure Java recursive text splitter instead of native Tree-Sitter
+        // Language detection is kept for potential future use but not required for splitting
+        List<ASTChunk> astChunks = recursiveTextSplitter.chunkCode(file.content());
 
         List<CodeChunk> chunks = new ArrayList<>();
         for (ASTChunk astChunk : astChunks) {
@@ -418,6 +490,7 @@ public class IndexingService {
             long start = System.currentTimeMillis();
 
             // Batch embedding call - single API call for multiple texts
+            log.info("Sending batch of {} chunks to LLM provider for embedding...", texts.size());
             List<float[]> embeddings = provider.embedBatch(texts);
 
             long latency = System.currentTimeMillis() - start;
@@ -430,11 +503,11 @@ public class IndexingService {
 
             // Save batch to database
             codeChunkRepository.saveAll(chunks);
-            log.info("Saved embedding batch of {} chunks (latency: {} ms)", chunks.size(), latency);
+            log.info("Vectors successfully saved to Postgres DB. Batch of {} chunks (latency: {} ms)", chunks.size(), latency);
 
         } catch (Exception e) {
             providerMetrics.recordFailure(repo.getEmbeddingModel());
-            log.error("Batch embedding failed for {} chunks", chunks.size(), e);
+            log.error("Failed at Embedding Pipeline: Batch embedding failed for {} chunks (Rate limit/Resilience4j may have triggered)", chunks.size(), e);
 
             // Optional: Fallback to individual embeddings for this batch
             log.info("Falling back to individual embeddings for {} chunks", chunks.size());
@@ -511,7 +584,9 @@ public class IndexingService {
         log.info("Missing embeddings completed for repo {}", repoId);
     }
 
-    private String determineErrorMessage(Exception ex) {
-        return "Indexing failed: " + ex.getMessage();
+    // Accepts Throwable (not just Exception) so we can handle JVM Errors
+    // like UnsatisfiedLinkError, OutOfMemoryError, etc.
+    private String determineErrorMessage(Throwable t) {
+        return "Indexing failed: " + t.getMessage();
     }
 }
