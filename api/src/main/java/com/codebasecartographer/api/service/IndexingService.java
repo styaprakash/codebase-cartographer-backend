@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.codebasecartographer.api.dto.ASTChunk;
@@ -12,6 +13,7 @@ import com.codebasecartographer.api.entity.CodeChunk;
 import com.codebasecartographer.api.entity.Repository;
 import com.codebasecartographer.api.enums.ProgrammingLanguage;
 import com.codebasecartographer.api.enums.RepositoryStatus;
+import com.codebasecartographer.api.exception.BadRequestException;
 import com.codebasecartographer.api.exception.ConflictException;
 import com.codebasecartographer.api.exception.ResourceNotFoundException;
 import com.codebasecartographer.api.repository.CodeChunkRepository;
@@ -54,7 +56,10 @@ public class IndexingService {
     // that was causing UnsatisfiedLinkError crashes on non-glibc systems
     private final RecursiveTextSplitter recursiveTextSplitter;
 
-    private static final int EMBEDDING_BATCH_SIZE = 20; // Adjust based on Ollama's limits
+    // Shared executor for parallel file processing
+    private final java.util.concurrent.ExecutorService fileProcessingExecutor = java.util.concurrent.Executors.newFixedThreadPool(20);
+
+    private static final int EMBEDDING_BATCH_SIZE = 5; // Safe batch size for local Ollama hardware
 
     public IndexingService(RepositoryRepository repositoryRepository,
             CodeChunkRepository codeChunkRepository,
@@ -84,7 +89,7 @@ public class IndexingService {
     // 3. Prepares repo in DB (deletes old chunks, resets counters, sets PENDING)
     // 4. Transaction commits
     // 5. THEN enqueues the job — worker never sees uncommitted state
-    public RepoResponse triggerIndexing(String repoId, String name, String fullName, String branch, String language) {
+    public RepoResponse triggerIndexing(String repoId, String name, String fullName, String branch, String language, String embeddingModel) {
         Repository repo = repositoryRepository.findById(repoId)
                 .orElseThrow(() -> new ResourceNotFoundException("Repository", "id", repoId));
         RepositoryStatus current = repo.getStatus();
@@ -96,6 +101,23 @@ public class IndexingService {
 
         if (name != null || fullName != null || branch != null) {
             repoService.updateRepoMetadata(repoId, name, fullName, branch, language);
+        }
+
+        if (embeddingModel != null && !embeddingModel.isBlank()) {
+            // Validate the string matches a real enum constant (rejects garbage input)
+            com.codebasecartographer.api.enums.EmbeddingModel modelEnum;
+            try {
+                modelEnum = com.codebasecartographer.api.enums.EmbeddingModel.valueOf(embeddingModel);
+            } catch (IllegalArgumentException e) {
+                throw new BadRequestException("Invalid embedding model: " + embeddingModel);
+            }
+            // Ensure the model is enabled before allowing it into the pipeline
+            if (!modelEnum.isEnabled()) {
+                throw new BadRequestException("Embedding model is not active: " + embeddingModel);
+            }
+            repo.setEmbeddingModel(modelEnum);
+            repositoryRepository.save(repo);
+            log.info("Assigned embedding model {} to repo {} from user selection", embeddingModel, repoId);
         }
 
         repoService.prepareIndexing(repoId);
@@ -132,6 +154,10 @@ public class IndexingService {
             repositoryRepository.save(repository);
             log.info("Assigned embedding model {} to repo {}", selected, repoId);
         }
+
+        // ALWAYS clear old chunks in the Vector DB to prevent duplicates and orphaned data
+        codeChunkRepository.deleteChunksByRepoId(repoId);
+        log.info("Cleared any existing chunks for repo {} before starting fresh indexing", repoId);
 
         String accessToken = repository.getUser().getAccessToken();
         String[] parts = repository.getFullName().split("/");
@@ -233,22 +259,20 @@ public class IndexingService {
             }
 
             // 3. Second Pass: Process files in parallel
-            int threads = 20;
-            java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(threads);
             List<CodeChunk> sharedBuffer = java.util.Collections.synchronizedList(new ArrayList<>());
             List<java.util.concurrent.CompletableFuture<Void>> futures = new ArrayList<>();
 
-            java.util.concurrent.atomic.AtomicInteger submitted = new java.util.concurrent.atomic.AtomicInteger(0);
+            java.util.concurrent.atomic.AtomicInteger started = new java.util.concurrent.atomic.AtomicInteger(0);
             java.util.concurrent.atomic.AtomicInteger processed = new java.util.concurrent.atomic.AtomicInteger(0);
 
             for (GitHubFileService.GithubFile file : filesToProcess) {
                 final String filePath = file.path();
-                int currentIndex = submitted.incrementAndGet();
-                
-                eventPublisher.publishEvent(new IndexingFileEvent(this, repoId, "indexing", filePath, currentIndex, totalFiles));
 
                 // Submit file processing to the thread pool for parallel execution
                 futures.add(java.util.concurrent.CompletableFuture.runAsync(() -> {
+                    int currentIndex = started.incrementAndGet();
+                    eventPublisher.publishEvent(new IndexingFileEvent(this, repoId, "indexing", filePath, currentIndex, totalFiles));
+
                     try {
                         List<CodeChunk> fileChunks = buildChunks(repository, file);
 
@@ -279,11 +303,10 @@ public class IndexingService {
                         repoService.updateProgress(repoId, completedCount, totalFiles);
                         eventPublisher.publishEvent(new IndexingFileEvent(this, repoId, "completed", filePath, completedCount, totalFiles));
                     }
-                }, executor));
+                }, fileProcessingExecutor));
             }
 
             java.util.concurrent.CompletableFuture.allOf(futures.toArray(new java.util.concurrent.CompletableFuture[0])).join();
-            executor.shutdown();
 
             if (!sharedBuffer.isEmpty()) {
                 generateAndSaveEmbeddingsForBatch(repoId, new ArrayList<>(sharedBuffer));
@@ -348,21 +371,21 @@ public class IndexingService {
         int totalFiles = filesToFetch.size();
         if (totalFiles == 0) return;
 
+        java.util.concurrent.atomic.AtomicInteger started = new java.util.concurrent.atomic.AtomicInteger(0);
         java.util.concurrent.atomic.AtomicInteger processed = new java.util.concurrent.atomic.AtomicInteger(0);
-        int threads = Math.min(20, totalFiles);
-        java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(threads);
         List<CodeChunk> sharedBuffer = java.util.Collections.synchronizedList(new ArrayList<>());
         List<java.util.concurrent.CompletableFuture<Void>> futures = new ArrayList<>();
 
         for (String filePath : filesToFetch) {
-            int currentIndex = processed.incrementAndGet();
-            eventPublisher.publishEvent(new IndexingFileEvent(this, repoId, "indexing", filePath, currentIndex, totalFiles));
-
             futures.add(java.util.concurrent.CompletableFuture.runAsync(() -> {
+                int currentIndex = started.incrementAndGet();
+                eventPublisher.publishEvent(new IndexingFileEvent(this, repoId, "indexing", filePath, currentIndex, totalFiles));
+
                 try {
                     String content = gitHubFileService.fetchFileContent(owner, repoName, filePath, branch, accessToken);
                     if (content == null || content.isBlank()) {
-                        eventPublisher.publishEvent(new IndexingFileEvent(this, repoId, "completed", filePath, currentIndex, totalFiles));
+                        int completedCount = processed.incrementAndGet();
+                        eventPublisher.publishEvent(new IndexingFileEvent(this, repoId, "completed", filePath, completedCount, totalFiles));
                         return;
                     }
 
@@ -385,16 +408,17 @@ public class IndexingService {
                         }
                     }
 
-                    eventPublisher.publishEvent(new IndexingFileEvent(this, repoId, "completed", filePath, currentIndex, totalFiles));
+                    int completedCount = processed.incrementAndGet();
+                    eventPublisher.publishEvent(new IndexingFileEvent(this, repoId, "completed", filePath, completedCount, totalFiles));
                 } catch (Exception e) {
                     log.warn("Skipping file {}: {}", filePath, e.getMessage());
-                    eventPublisher.publishEvent(new IndexingFileEvent(this, repoId, "completed", filePath, currentIndex, totalFiles));
+                    int completedCount = processed.incrementAndGet();
+                    eventPublisher.publishEvent(new IndexingFileEvent(this, repoId, "completed", filePath, completedCount, totalFiles));
                 }
-            }, executor));
+            }, fileProcessingExecutor));
         }
 
         java.util.concurrent.CompletableFuture.allOf(futures.toArray(new java.util.concurrent.CompletableFuture[0])).join();
-        executor.shutdown();
 
         if (!sharedBuffer.isEmpty()) {
             generateAndSaveEmbeddingsForBatch(repoId, new ArrayList<>(sharedBuffer));
@@ -441,7 +465,7 @@ public class IndexingService {
 
     // Fetch all chunks for this repo (no embedding yet), batch-call embeddings API,
     // save VECTOR(1536) to embedding column
-    private void generateAndSaveEmbeddingsForBatch(String repoId, List<CodeChunk> chunks) {
+    protected void generateAndSaveEmbeddingsForBatch(String repoId, List<CodeChunk> chunks) {
         Repository repo = repositoryRepository.findById(repoId)
                 .orElseThrow(() -> new ResourceNotFoundException("Repository", "id", repoId));
 
@@ -482,6 +506,11 @@ public class IndexingService {
         log.info("Completed embedding generation for repo {}", repoId);
     }
 
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    protected void saveChunksToDatabase(List<CodeChunk> chunks) {
+        codeChunkRepository.saveAll(chunks);
+    }
+
     // New helper method for batch embedding
     private void embedBatchAndSave(Repository repo, EmbeddingProvider provider,
             List<String> texts, List<CodeChunk> chunks) {
@@ -501,8 +530,8 @@ public class IndexingService {
                 chunks.get(i).setEmbedding(embeddings.get(i));
             }
 
-            // Save batch to database
-            codeChunkRepository.saveAll(chunks);
+            // Save batch to database in isolated transaction
+            saveChunksToDatabase(chunks);
             log.info("Vectors successfully saved to Postgres DB. Batch of {} chunks (latency: {} ms)", chunks.size(), latency);
 
         } catch (Exception e) {
@@ -531,7 +560,7 @@ public class IndexingService {
                 savedChunks.add(chunk);
 
                 if (savedChunks.size() >= EMBEDDING_BATCH_SIZE) {
-                    codeChunkRepository.saveAll(savedChunks);
+                    saveChunksToDatabase(savedChunks);
                     savedChunks.clear();
                 }
             } catch (Exception e) {
@@ -541,11 +570,11 @@ public class IndexingService {
         }
 
         if (!savedChunks.isEmpty()) {
-            codeChunkRepository.saveAll(savedChunks);
+            saveChunksToDatabase(savedChunks);
         }
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void generateMissingEmbeddings(String repoId) {
         Repository repo = repositoryRepository.findById(repoId)
                 .orElseThrow(() -> new ResourceNotFoundException("Repository", "id", repoId));
@@ -580,7 +609,7 @@ public class IndexingService {
             }
         }
 
-        codeChunkRepository.saveAll(chunks);
+        saveChunksToDatabase(chunks);
         log.info("Missing embeddings completed for repo {}", repoId);
     }
 
@@ -588,5 +617,35 @@ public class IndexingService {
     // like UnsatisfiedLinkError, OutOfMemoryError, etc.
     private String determineErrorMessage(Throwable t) {
         return "Indexing failed: " + t.getMessage();
+    }
+
+    @org.springframework.context.event.EventListener(org.springframework.boot.context.event.ApplicationReadyEvent.class)
+    public void cleanupOrphanedJobs() {
+        log.info("Running startup sweep to clean up orphaned indexing jobs...");
+        List<Repository> orphaned = repositoryRepository.findByStatus(RepositoryStatus.INDEXING);
+        for (Repository repo : orphaned) {
+            log.warn("Found orphaned job for repo {}. Marking as FAILED.", repo.getId());
+            repoService.updateStatus(repo.getId(), RepositoryStatus.FAILED);
+            repoService.setErrorMessage(repo.getId(), "Indexing interrupted: Server was shut down unexpectedly.");
+            codeChunkRepository.deleteChunksByRepoId(repo.getId());
+            log.info("Deleted orphaned chunks for repo {} in Vector DB", repo.getId());
+        }
+        log.info("Startup sweep complete. Cleaned up {} orphaned jobs.", orphaned.size());
+    }
+
+    @jakarta.annotation.PreDestroy
+    public void shutdown() {
+        log.info("Shutting down IndexingService file processing executor...");
+        fileProcessingExecutor.shutdown();
+        try {
+            if (!fileProcessingExecutor.awaitTermination(30, java.util.concurrent.TimeUnit.SECONDS)) {
+                log.warn("Executor did not terminate in the specified time. Forcing shutdown...");
+                fileProcessingExecutor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            log.warn("Executor shutdown interrupted. Forcing shutdown...");
+            fileProcessingExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
     }
 }

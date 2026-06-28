@@ -14,4 +14,5 @@ public class ReindexRequest {
     private String fullName;
     private String branch;
     private String language;
+    private String embeddingModel;
 }

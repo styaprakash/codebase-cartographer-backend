@@ -34,7 +34,7 @@ spring:
   data:
     redis:
       host: localhost
-      port: 6380
+      port: 6379
       timeout: 2000ms
       client-type: lettuce
 
@@ -78,8 +78,16 @@ resilience4j:
 
 # LLM API Keys — override via environment variables in production
 deepseek:
-  api-key: ${DEEPSEEK_API_KEY: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}
+  api-key: ${DEEPSEEK_API_KEY:your-api-key-here}
 
 openai:
   api:
     key: ${OPENAI_API_KEY:your-openai-api-key-here}
+
+openrouter:
+  api:
+    key: ${OPENROUTER_API_KEY:your-api-key-here}
+
+gemini:
+  api:
+    key: ${GEMINI_API_KEY:your-gemini-api-key-here}

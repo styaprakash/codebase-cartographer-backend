@@ -218,6 +218,19 @@
 						}
 					},
 					"response": []
+				},
+				{
+					"name": "Reset Repository Status",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/repos/{{repoId}}/reset-status",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "repos", "{{repoId}}", "reset-status"]
+						}
+					},
+					"response": []
 				}
 			]
 		},
@@ -235,9 +248,9 @@
 							}
 						],
 						"url": {
-							"raw": "{{baseUrl}}/api/repos/{{repoId}}/stream",
+							"raw": "{{baseUrl}}/api/sse/indexing/{{repoId}}",
 							"host": ["{{baseUrl}}"],
-							"path": ["api", "repos", "{{repoId}}", "stream"]
+							"path": ["api", "sse", "indexing", "{{repoId}}"]
 						},
 						"description": "Opens an SSE connection to receive real-time indexing progress events.\n\nEvent types:\n- `file_event`: Sent per-file with status, file_path, progress, total_files.\n- `status`: Sent when indexing status changes (INDEXING → INDEXED or FAILED).\n\nThe stream auto-completes when indexing finishes or fails."
 					},

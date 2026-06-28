@@ -14,7 +14,8 @@ public enum GenerativeLlmModel {
 
     // Premium remote APIs
     OPENAI_GPT4("gpt-4o", "openai", true),
-    DEEPSEEK_V4("deepseek-chat", "deepseek", true);
+    DEEPSEEK_V4("deepseek-chat", "deepseek", true),
+    GEMINI_1_5_FLASH("gemini-1.5-flash", "gemini", true);
 
     private final String modelTag;      // identifier sent to inference API
     private final String providerType;  // "ollama" | "openai" | "deepseek"

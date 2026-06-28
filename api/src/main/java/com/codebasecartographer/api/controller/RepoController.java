@@ -84,7 +84,8 @@ public class RepoController extends BaseController {
         String fullName = metadata != null ? metadata.getFullName() : null;
         String branch = metadata != null ? metadata.getBranch() : null;
         String language = metadata != null ? metadata.getLanguage() : null;
-        return indexingService.triggerIndexing(id, name, fullName, branch, language);
+        String embeddingModel = metadata != null ? metadata.getEmbeddingModel() : null;
+        return indexingService.triggerIndexing(id, name, fullName, branch, language, embeddingModel);
     }
 
     // GET  /api/repos/{id}/status

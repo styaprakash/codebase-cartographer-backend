@@ -18,6 +18,10 @@ public class QwenEmbeddingProvider implements EmbeddingProvider {
     public QwenEmbeddingProvider(RestClient.Builder builder) {
         this.restClient = builder
                 .baseUrl("http://localhost:11434")
+                .requestFactory(new org.springframework.http.client.SimpleClientHttpRequestFactory() {{
+                    setConnectTimeout(30000);
+                    setReadTimeout(180000);
+                }})
                 .build();
     }
 

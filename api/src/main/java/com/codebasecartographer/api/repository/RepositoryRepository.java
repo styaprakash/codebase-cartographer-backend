@@ -4,6 +4,9 @@ import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import com.codebasecartographer.api.entity.Repository;
 import com.codebasecartographer.api.enums.RepositoryStatus;
@@ -33,5 +36,9 @@ public interface RepositoryRepository extends JpaRepository<Repository, String> 
     boolean existsByUserIdAndGithubRepoId(String userId, String githubRepoId);
 
     List<Repository> findByFullName(String fullName);
+
+    @Modifying
+    @Query("UPDATE Repository r SET r.indexedFiles = :indexedFiles, r.totalFiles = :totalFiles WHERE r.id = :id")
+    void updateProgressAtomic(@Param("id") String id, @Param("indexedFiles") int indexedFiles, @Param("totalFiles") int totalFiles);
 
 }

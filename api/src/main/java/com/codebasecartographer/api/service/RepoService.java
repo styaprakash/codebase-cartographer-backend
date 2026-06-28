@@ -137,16 +137,10 @@ public class RepoService {
         log.info("Repo {} -> {}", repoId, status);
     }
 
-    // updateProgress: Called during indexing — frontend polls for progress bar update
+    // updateProgress: Called during indexing — uses atomic JPQL update to avoid OptimisticLockException
     @Transactional
     public void updateProgress(String repoId, int indexedFiles, int totalFiles){
-        //check if the repo exist
-        Repository repo = repositoryRepository.findById(repoId)
-            .orElseThrow(() -> new ResourceNotFoundException("Repository", "id", repoId));
-
-        repo.setIndexedFiles(indexedFiles);
-        repo.setTotalFiles(totalFiles);
-        repositoryRepository.save(repo);
+        repositoryRepository.updateProgressAtomic(repoId, indexedFiles, totalFiles);
     }
 
     @Transactional
