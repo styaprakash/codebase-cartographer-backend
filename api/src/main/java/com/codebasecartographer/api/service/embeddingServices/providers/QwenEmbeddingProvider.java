@@ -10,7 +10,9 @@ import com.codebasecartographer.api.dto.response.EmbeddingResponse;
 import com.codebasecartographer.api.enums.EmbeddingModel;
 
 import io.github.resilience4j.bulkhead.annotation.Bulkhead;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @Component
 public class QwenEmbeddingProvider implements EmbeddingProvider {
     private final RestClient restClient;
@@ -51,6 +53,21 @@ public class QwenEmbeddingProvider implements EmbeddingProvider {
                 .body(new EmbeddingRequest(model.getModelTag(), texts, model.getDimension()))
                 .retrieve()
                 .body(EmbeddingResponse.class);
+
+        if (response == null || response.embeddings() == null || response.embeddings().isEmpty()) {
+            throw new RuntimeException("Ollama returned null or empty embeddings for model " + model.getModelTag());
+        }
+
+        // Validate dimension of first embedding — all should be identical
+        float[] first = response.embeddings().get(0);
+        if (first.length != model.getDimension()) {
+            log.error("DIMENSION MISMATCH: Ollama returned {} dimensions for model '{}', but the database requires exactly 1536.",
+                    first.length, model.getModelTag());
+            throw new IllegalStateException("DIMENSION MISMATCH: Ollama returned " + first.length
+                    + " dimensions for model '" + model.getModelTag()
+                    + "', but the database requires exactly 1536.");
+        }
+
         return response.embeddings();
     }
 

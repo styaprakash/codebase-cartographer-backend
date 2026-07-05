@@ -78,7 +78,7 @@ resilience4j:
 
 # LLM API Keys — override via environment variables in production
 deepseek:
-  api-key: ${DEEPSEEK_API_KEY:your-api-key-here}
+  api-key: ${DEEPSEEK_API_KEY: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}
 
 openai:
   api:
@@ -86,7 +86,7 @@ openai:
 
 openrouter:
   api:
-    key: ${OPENROUTER_API_KEY:your-api-key-here}
+    key: ${OPENROUTER_API_KEY:}
 
 gemini:
   api:

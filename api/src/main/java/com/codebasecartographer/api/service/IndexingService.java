@@ -4,8 +4,6 @@ import java.util.ArrayList;
 import java.util.List;
 
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
 
 import com.codebasecartographer.api.dto.ASTChunk;
 import com.codebasecartographer.api.dto.response.RepoResponse;
@@ -55,6 +53,7 @@ public class IndexingService {
     // Pure Java text splitter — replaces the native Tree-Sitter JNI library
     // that was causing UnsatisfiedLinkError crashes on non-glibc systems
     private final RecursiveTextSplitter recursiveTextSplitter;
+    private final ChunkSaveService chunkSaveService;
 
     // Shared executor for parallel file processing
     private final java.util.concurrent.ExecutorService fileProcessingExecutor = java.util.concurrent.Executors.newFixedThreadPool(20);
@@ -70,7 +69,8 @@ public class IndexingService {
             EmbeddingModelSelector modelSelector,
             EmbeddingProviderMetrics providerMetrics,
             ApplicationEventPublisher eventPublisher,
-            RecursiveTextSplitter recursiveTextSplitter) {
+            RecursiveTextSplitter recursiveTextSplitter,
+            ChunkSaveService chunkSaveService) {
         this.repositoryRepository = repositoryRepository;
         this.codeChunkRepository = codeChunkRepository;
         this.repoService = repoService;
@@ -81,6 +81,7 @@ public class IndexingService {
         this.providerMetrics = providerMetrics;
         this.eventPublisher = eventPublisher;
         this.recursiveTextSplitter = recursiveTextSplitter;
+        this.chunkSaveService = chunkSaveService;
     }
 
     // Called when user clicks "Index repo" on dashboard
@@ -167,9 +168,15 @@ public class IndexingService {
 
         try {
             log.info("Fetching zipball from GitHub for: {}", repository.getFullName());
-            log.info("Starting HTTP call to GitHub Archive API for zipball: {}/{}", owner, repoName);
+            String zipUrl = "https://api.github.com/repos/" + owner + "/" + repoName + "/zipball";
+            if (branch != null && !branch.trim().isEmpty()) {
+                zipUrl += "/" + branch.trim();
+                log.info("Starting HTTP call to GitHub Archive API for zipball: {}/{} (branch: {})", owner, repoName, branch.trim());
+            } else {
+                log.info("Starting HTTP call to GitHub Archive API for zipball: {}/{} (default branch)", owner, repoName);
+            }
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create("https://api.github.com/repos/" + owner + "/" + repoName + "/zipball"))
+                    .uri(URI.create(zipUrl))
                     .header("Authorization", "Bearer " + accessToken)
                     .header("Accept", "application/vnd.github.v3+json")
                     .header("User-Agent", "Codebase-Cartographer")
@@ -194,7 +201,12 @@ public class IndexingService {
                 final int redirectCode = response.statusCode(); // Save to final var for lambda capture
                 String location = response.headers().firstValue("Location")
                         .orElseThrow(() -> new com.codebasecartographer.api.exception.GithubApiException("Redirect missing Location header", redirectCode));
-                
+
+                // GitHub's codeload redirect URLs sometimes end with a trailing slash that causes 404
+                if (location.endsWith("/")) {
+                    location = location.substring(0, location.length() - 1);
+                }
+
                 log.info("Handling GitHub redirect to: {}", location);
                 // We must close the old input stream to prevent connection leaks
                 response.body().close(); 
@@ -219,6 +231,12 @@ public class IndexingService {
                 log.error("Failed at Zip Download: GitHub API returned status {}", response.statusCode());
                 if (response.statusCode() == 400) {
                     throw new com.codebasecartographer.api.exception.GithubApiException("Repository is empty or un-downloadable (GitHub 400)", 400);
+                }
+                if (response.statusCode() == 404) {
+                    throw new com.codebasecartographer.api.exception.GithubApiException(
+                            "Repository branch not found (GitHub 404). Ensure the branch '"
+                                    + (branch != null ? branch : "default")
+                                    + "' exists and the repository is not empty.", 404);
                 }
                 throw new com.codebasecartographer.api.exception.GithubApiException("Failed to fetch zipball, GitHub returned status: " + response.statusCode(), response.statusCode());
             }
@@ -309,15 +327,30 @@ public class IndexingService {
             java.util.concurrent.CompletableFuture.allOf(futures.toArray(new java.util.concurrent.CompletableFuture[0])).join();
 
             if (!sharedBuffer.isEmpty()) {
-                generateAndSaveEmbeddingsForBatch(repoId, new ArrayList<>(sharedBuffer));
+                List<CodeChunk> remainingChunks = new ArrayList<>(sharedBuffer);
                 sharedBuffer.clear();
+                try {
+                    generateAndSaveEmbeddingsForBatch(repoId, remainingChunks);
+                } catch (Exception e) {
+                    log.error("Failed to save remaining {} chunks after parallel processing", remainingChunks.size(), e);
+                }
             }
 
-            // 4. Final Progress Update
+            // 4. Post-join verification: confirm chunks actually landed in DB
+            long savedChunkCount = codeChunkRepository.countByRepository_Id(repoId);
+            if (savedChunkCount == 0) {
+                log.error("Indexing completed but zero chunks found in DB for repo {}. Marking as FAILED.", repoId);
+                repoService.setErrorMessage(repoId, "Indexing completed but no code chunks were saved to the database.");
+                eventPublisher.publishEvent(new IndexingStatusEvent(this, repoId, RepositoryStatus.FAILED,
+                        "No code chunks saved to database"));
+                return;
+            }
+
+            // 5. Final Progress Update
             repoService.updateProgress(repoId, totalFiles, totalFiles);
             repoService.updateStatus(repoId, RepositoryStatus.INDEXED);
             eventPublisher.publishEvent(new IndexingStatusEvent(this, repoId, RepositoryStatus.INDEXED, null));
-            log.info("Indexing complete for: {}", repository.getFullName());
+            log.info("Indexing complete for: {} — {} chunks saved to DB", repository.getFullName(), savedChunkCount);
 
         } catch (Throwable t) {
             // Catch Throwable to handle JVM-level Errors (UnsatisfiedLinkError, OOM, etc.)
@@ -421,8 +454,13 @@ public class IndexingService {
         java.util.concurrent.CompletableFuture.allOf(futures.toArray(new java.util.concurrent.CompletableFuture[0])).join();
 
         if (!sharedBuffer.isEmpty()) {
-            generateAndSaveEmbeddingsForBatch(repoId, new ArrayList<>(sharedBuffer));
+            List<CodeChunk> remainingChunks = new ArrayList<>(sharedBuffer);
             sharedBuffer.clear();
+            try {
+                generateAndSaveEmbeddingsForBatch(repoId, remainingChunks);
+            } catch (Exception e) {
+                log.error("Failed to save remaining {} chunks after incremental processing", remainingChunks.size(), e);
+            }
         }
 
         log.info("Incremental indexing complete for: {}", repository.getFullName());
@@ -506,10 +544,7 @@ public class IndexingService {
         log.info("Completed embedding generation for repo {}", repoId);
     }
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
-    protected void saveChunksToDatabase(List<CodeChunk> chunks) {
-        codeChunkRepository.saveAll(chunks);
-    }
+
 
     // New helper method for batch embedding
     private void embedBatchAndSave(Repository repo, EmbeddingProvider provider,
@@ -530,24 +565,58 @@ public class IndexingService {
                 chunks.get(i).setEmbedding(embeddings.get(i));
             }
 
-            // Save batch to database in isolated transaction
-            saveChunksToDatabase(chunks);
+            // Save batch to database via ChunkSaveService (proper @Transactional)
+            chunkSaveService.saveChunks(chunks);
             log.info("Vectors successfully saved to Postgres DB. Batch of {} chunks (latency: {} ms)", chunks.size(), latency);
 
         } catch (Exception e) {
             providerMetrics.recordFailure(repo.getEmbeddingModel());
-            log.error("Failed at Embedding Pipeline: Batch embedding failed for {} chunks (Rate limit/Resilience4j may have triggered)", chunks.size(), e);
 
-            // Optional: Fallback to individual embeddings for this batch
+            // Unwrap the cause chain to find the root exception
+            Throwable rootCause = e;
+            while (rootCause.getCause() != null) rootCause = rootCause.getCause();
+
+            // AUTH FAILURE: API key rejected — fallback will hit the same 401/403, abort immediately
+            if (rootCause instanceof org.springframework.web.client.HttpClientErrorException.Unauthorized
+                    || rootCause instanceof org.springframework.web.client.HttpClientErrorException.Forbidden) {
+                String errorType = rootCause.getClass().getSimpleName();
+                log.error("AUTH FAILURE: API key rejected by {} — aborting indexing. [{}] {}",
+                        repo.getEmbeddingModel(), errorType, rootCause.getMessage());
+                throw new RuntimeException("Embedding API authentication failed: " + rootCause.getMessage(), e);
+            }
+
+            // DB integrity failure (e.g., pgvector dimension mismatch) — also abort, fallback won't help
+            if (rootCause instanceof org.springframework.dao.DataIntegrityViolationException
+                    || (e.getCause() != null && e.getCause() instanceof org.springframework.dao.DataIntegrityViolationException)) {
+                log.error("DATABASE INTEGRITY ERROR: Failed to save {} chunks. Likely dimension mismatch between embedding provider ({}) and DB column. [{}] {}",
+                        chunks.size(), repo.getEmbeddingModel(), rootCause.getClass().getSimpleName(), rootCause.getMessage(), e);
+                throw new RuntimeException("Database save failed: " + rootCause.getMessage(), e);
+            }
+
+            // Dimension mismatch — provider returns wrong size, fallback will hit same error
+            if (rootCause instanceof IllegalStateException
+                    || (rootCause.getMessage() != null && rootCause.getMessage().startsWith("DIMENSION MISMATCH"))) {
+                log.error("DIMENSION MISMATCH: Embedding provider {} returned wrong dimensions. "
+                        + "Aborting indexing — fallback would hit the same error.",
+                        repo.getEmbeddingModel());
+                throw new RuntimeException("Embedding dimension mismatch: " + rootCause.getMessage(), e);
+            }
+
+            // Transient errors (rate limits, timeouts, 5xx) — fallback may succeed
+            String errorType = e.getClass().getSimpleName();
+            log.error("EMBEDDING PIPELINE ERROR: Batch failed for {} chunks. [{}] {}",
+                    chunks.size(), errorType, e.getMessage(), e);
+
             log.info("Falling back to individual embeddings for {} chunks", chunks.size());
             fallbackToIndividualEmbeddings(repo, provider, chunks);
         }
     }
 
-    // Optional: Fallback method if batch fails
+    // Fallback: embed and save chunks individually when batch fails
     private void fallbackToIndividualEmbeddings(Repository repo, EmbeddingProvider provider,
             List<CodeChunk> chunks) {
         List<CodeChunk> savedChunks = new ArrayList<>();
+        int failedCount = 0;
 
         for (CodeChunk chunk : chunks) {
             try {
@@ -560,21 +629,31 @@ public class IndexingService {
                 savedChunks.add(chunk);
 
                 if (savedChunks.size() >= EMBEDDING_BATCH_SIZE) {
-                    saveChunksToDatabase(savedChunks);
+                    chunkSaveService.saveChunks(savedChunks);
                     savedChunks.clear();
                 }
             } catch (Exception e) {
                 providerMetrics.recordFailure(repo.getEmbeddingModel());
-                log.error("Individual embedding failed for chunk {}", chunk.getId(), e);
+                failedCount++;
+                log.error("Chunk save failed for file={}, name={}: ",
+                        chunk.getFilePath(), chunk.getChunkName(), e);
             }
         }
 
         if (!savedChunks.isEmpty()) {
-            saveChunksToDatabase(savedChunks);
+            try {
+                chunkSaveService.saveChunks(savedChunks);
+            } catch (Exception e) {
+                failedCount += savedChunks.size();
+                log.error("Final fallback batch save failed for {} chunks: ",
+                        savedChunks.size(), e);
+            }
         }
+
+        log.warn("Fallback summary for batch of {} chunks: saved={}, failed={}",
+                chunks.size(), chunks.size() - failedCount, failedCount);
     }
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void generateMissingEmbeddings(String repoId) {
         Repository repo = repositoryRepository.findById(repoId)
                 .orElseThrow(() -> new ResourceNotFoundException("Repository", "id", repoId));
@@ -605,18 +684,25 @@ public class IndexingService {
                 chunk.setEmbedding(embedding);
             } catch (Exception e) {
                 providerMetrics.recordFailure(repo.getEmbeddingModel());
-                log.error("Failed embedding chunk {}", chunk.getId(), e);
+                log.error("Failed embedding chunk in file={}, name={}: [{}] {}",
+                        chunk.getFilePath(), chunk.getChunkName(),
+                        e.getClass().getSimpleName(), e.getMessage(), e);
             }
         }
 
-        saveChunksToDatabase(chunks);
+        chunkSaveService.saveChunks(chunks);
         log.info("Missing embeddings completed for repo {}", repoId);
     }
 
     // Accepts Throwable (not just Exception) so we can handle JVM Errors
     // like UnsatisfiedLinkError, OutOfMemoryError, etc.
     private String determineErrorMessage(Throwable t) {
-        return "Indexing failed: " + t.getMessage();
+        String rootType = t.getClass().getSimpleName();
+        Throwable cause = t.getCause();
+        if (cause != null && cause != t) {
+            return "Indexing failed [" + rootType + " → " + cause.getClass().getSimpleName() + "]: " + cause.getMessage();
+        }
+        return "Indexing failed [" + rootType + "]: " + t.getMessage();
     }
 
     @org.springframework.context.event.EventListener(org.springframework.boot.context.event.ApplicationReadyEvent.class)

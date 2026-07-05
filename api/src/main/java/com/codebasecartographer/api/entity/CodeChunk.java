@@ -20,6 +20,9 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import org.springframework.data.domain.Persistable;
+
+
 @Entity
 @Table(name = "code_chunks")
 
@@ -28,7 +31,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 
-public class CodeChunk {
+public class CodeChunk implements Persistable<String> {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID) // Auto-generate UUID for PK
     private String id;
@@ -72,7 +75,7 @@ public class CodeChunk {
     private String entityName;
 
     // embedding field added in Week 3 with pgvector setup: Completed
-    @Column(columnDefinition = "vector")
+    @Column(name = "embedding", columnDefinition = "vector(1536)")
     private float[] embedding;
 
     @Builder.Default
@@ -85,6 +88,16 @@ public class CodeChunk {
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();
+    }
+
+    @Override
+    public String getId() {
+        return id;
+    }
+
+    @Override
+    public boolean isNew() {
+        return true; // Chunks are always new when saved — never merged
     }
 
 }

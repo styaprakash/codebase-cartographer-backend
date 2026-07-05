@@ -88,14 +88,17 @@ public class IndexingSSEController {
                 emitters.remove(repoId);
             });
             emitter.onError((e) -> {
-                // When a client disconnects (e.g., closing the browser or React unmounts),
-                // an IOException (Broken Pipe) is thrown. If we call emitter.completeWithError(e),
-                // Spring treats it as an application crash and tries to forward to the /error page.
-                // Since the response is already committed (HTTP 200 OK SSE headers sent), this causes
-                // the "Cannot render error page" spam in the console. 
-                // We simply log it at debug level and remove the emitter.
-                log.debug("SSE client disconnected or network error for repo: {}", repoId);
+                // When a client disconnects, Spring's SseEmitter internally calls completeWithError()
+                // which dispatches to /error. Since the response is already committed (200 OK SSE),
+                // this causes "Cannot render error page" spam. Calling emitter.complete() here
+                // finalizes the emitter cleanly BEFORE Spring's internal error handling kicks in.
+                log.debug("SSE client disconnected or network error for repo: {} — completing emitter", repoId);
                 emitters.remove(repoId);
+                try {
+                    emitter.complete();
+                } catch (Exception ignored) {
+                    // Emitter may already be in a broken state — safe to ignore
+                }
             });
 
             log.info("Successfully established SSE connection for repo: {}", repoId);
@@ -123,8 +126,13 @@ public class IndexingSSEController {
                                     "total_files", event.getTotalFiles()
                             )));
                 } catch (IOException e) {
-                    log.warn("Failed to send file_event, removing emitter for repo: {}", event.getRepoId());
+                    log.warn("Failed to send file_event for repo: {} — completing emitter to prevent error page redirect", event.getRepoId());
                     emitters.remove(event.getRepoId());
+                    try {
+                        emitter.complete();
+                    } catch (Exception ignored) {
+                        // Emitter may already be in a broken state — safe to ignore
+                    }
                 }
             }
         }
@@ -151,8 +159,13 @@ public class IndexingSSEController {
                         emitters.remove(event.getRepoId());
                     }
                 } catch (IOException e) {
-                    log.warn("Failed to send status event, removing emitter for repo: {}", event.getRepoId());
+                    log.warn("Failed to send status event for repo: {} — completing emitter to prevent error page redirect", event.getRepoId());
                     emitters.remove(event.getRepoId());
+                    try {
+                        emitter.complete();
+                    } catch (Exception ignored) {
+                        // Emitter may already be in a broken state — safe to ignore
+                    }
                 }
             }
         }

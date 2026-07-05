@@ -52,6 +52,7 @@ public class SecurityConfig {
             
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/auth/**").permitAll() // All auth endpoints public
+                .dispatcherTypeMatchers(jakarta.servlet.DispatcherType.ERROR).permitAll() // Allow error dispatches (SSE disconnects)
                 .requestMatchers("/error").permitAll()       // Let Spring handle errors gracefully
                 .anyRequest().authenticated()
             )

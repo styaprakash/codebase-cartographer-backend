@@ -33,6 +33,12 @@ public interface CodeChunkRepository extends JpaRepository<CodeChunk, String> {
     @Query(value = "DELETE FROM code_chunks WHERE repo_id = :repoId AND file_path IN :filePaths", nativeQuery = true)
     void deleteChunksByRepoIdAndFilePathIn(@Param("repoId") String repositoryId, @Param("filePaths") List<String> filePaths);
 
+    // Fetch distinct file paths for a repo — used by the file tree endpoint.
+    // Uses native query to avoid Hibernate loading entities with pgvector embedding
+    // columns, which crashes the PostgreSQL JDBC driver (PSQLException in TypeInfoCache).
+    @Query(value = "SELECT DISTINCT file_path FROM code_chunks WHERE repo_id = :repoId ORDER BY file_path", nativeQuery = true)
+    List<String> findDistinctFilePathsByRepoId(@Param("repoId") String repoId);
+
     // countByRepository_Id → how many chunks indexed so far for a repo (used for progress tracking)
     long countByRepository_Id(String repositoryId);
 

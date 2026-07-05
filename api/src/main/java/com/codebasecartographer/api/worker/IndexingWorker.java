@@ -117,6 +117,9 @@ public class IndexingWorker {
                                 // subclasses that silently kill threads if only Exception is caught.
                                 // This ensures the error is logged and the repo status is marked FAILED.
                                 log.error("SEVERE: Worker thread crashed for repo {} (possible JVM Error)", repoId, t);
+                                if (t.getCause() != null) {
+                                    log.error("Root cause: [{}] {}", t.getCause().getClass().getSimpleName(), t.getCause().getMessage());
+                                }
                                 try {
                                     repoService.updateStatus(repoId, RepositoryStatus.FAILED);
                                     repoService.setErrorMessage(repoId, "Worker crash: " + t.getMessage());

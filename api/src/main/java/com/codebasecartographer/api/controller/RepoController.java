@@ -85,6 +85,14 @@ public class RepoController extends BaseController {
         String branch = metadata != null ? metadata.getBranch() : null;
         String language = metadata != null ? metadata.getLanguage() : null;
         String embeddingModel = metadata != null ? metadata.getEmbeddingModel() : null;
+
+        // Permanent fix: Map legacy frontend payloads to prevent 400 Bad Request 
+        // without polluting the core EmbeddingModel enum
+        if ("OPENROUTER_QWEN_EMBEDDING".equals(embeddingModel)) {
+            log.info("Intercepted legacy embedding model request, upgrading to OPENROUTER_EMBEDDING_1536");
+            embeddingModel = "OPENROUTER_EMBEDDING_1536";
+        }
+
         return indexingService.triggerIndexing(id, name, fullName, branch, language, embeddingModel);
     }
 

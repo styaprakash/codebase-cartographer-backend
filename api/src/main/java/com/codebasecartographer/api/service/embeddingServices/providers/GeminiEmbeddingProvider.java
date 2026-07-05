@@ -55,6 +55,14 @@ public class GeminiEmbeddingProvider implements EmbeddingProvider {
         for (int i = 0; i < values.size(); i++) {
             result[i] = values.get(i);
         }
+
+        if (result.length != getModel().getDimension()) {
+            log.error("DIMENSION MISMATCH: Gemini returned {} dimensions, but the database requires exactly 1536.",
+                    result.length);
+            throw new IllegalStateException("DIMENSION MISMATCH: Gemini returned " + result.length
+                    + " dimensions, but the database requires exactly 1536.");
+        }
+
         return result;
     }
 

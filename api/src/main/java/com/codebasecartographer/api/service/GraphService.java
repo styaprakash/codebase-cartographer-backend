@@ -221,14 +221,10 @@ public class GraphService {
         // Security check first
         verifyRepoAccess(userId, repoId);
 
-        // Get all chunks → extract unique file paths
-        return codeChunkRepository
-                .findByRepository_Id(repoId)
-                .stream()
-                .map(CodeChunk::getFilePath)  // get filePath from each chunk
-                .distinct()                    // remove duplicates
-                .sorted()                      // alphabetical order
-                .collect(Collectors.toList());
+        // Use native query to get distinct file paths directly from DB.
+        // Avoids loading full CodeChunk entities (with pgvector embedding column
+        // which crashes the PostgreSQL JDBC driver — PSQLException in TypeInfoCache).
+        return codeChunkRepository.findDistinctFilePathsByRepoId(repoId);
     }
     // ── Verify Repo Access ────────────────────────────────────────
     // Security check reused across all public methods

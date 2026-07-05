@@ -13,7 +13,7 @@ public enum EmbeddingModel {
     EMBEDDING_GEMMA("embedding-gemma:300m", 768, "ollama", false),
     NV_EMBED_V2("nv-embed-v2", 4096, "ollama", false),
     GEMINI_EMBEDDING("text-embedding-004", 768, "gemini", true),
-    OPENROUTER_QWEN_EMBEDDING("qwen/qwen3-embedding-8b", 1536, "openrouter", true);
+    OPENROUTER_EMBEDDING_1536("openai/text-embedding-3-small", 1536, "openrouter", true);
 
     private final String modelTag;      // identifier sent to inference API
     private final int dimension;        // vector dimension produced
