@@ -31,16 +31,24 @@ public class OpenRouterEmbeddingProvider implements EmbeddingProvider {
     @PostConstruct
     public void validateApiKey() {
         if (apiKey == null || apiKey.isBlank() || apiKey.equals("dummy") || apiKey.equals("your-openrouter-api-key-here")) {
-            log.error("CRITICAL: OpenRouter API key is missing or invalid. " +
-                    "Set the OPENROUTER_API_KEY environment variable to a valid key from https://openrouter.ai/keys " +
-                    "— embeddings via OpenRouter will fail at runtime.");
-            throw new IllegalStateException(
-                    "OpenRouter API key is not configured. Set OPENROUTER_API_KEY env var.");
+            log.error("CRITICAL: OpenRouter API key is missing. Set OPENROUTER_API_KEY env var.");
+            throw new IllegalStateException("OpenRouter API key is not configured.");
         }
         // Mask the key for logging: show first 8 and last 4 characters
         String masked = apiKey.substring(0, Math.min(8, apiKey.length()))
                 + "..." + apiKey.substring(Math.max(0, apiKey.length() - 4));
         log.info("OpenRouter API key loaded: {} (length={})", masked, apiKey.length());
+
+        // Live validation — single-text embed call to confirm key is active
+        try {
+            float[] probe = embed("health check");
+            log.info("OpenRouter API key validated — embedding returned {} dimensions", probe.length);
+        } catch (Exception e) {
+            log.error("CRITICAL: OpenRouter API key is INVALID ({}). "
+                    + "Set a valid OPENROUTER_API_KEY env var. "
+                    + "The app will start but OpenRouter embeddings will fail at runtime.",
+                    e.getMessage());
+        }
     }
 
     @Override
