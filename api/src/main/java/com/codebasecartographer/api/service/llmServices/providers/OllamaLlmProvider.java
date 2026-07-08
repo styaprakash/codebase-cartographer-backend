@@ -32,7 +32,8 @@ public class OllamaLlmProvider implements GenerativeLlmProvider {
                 GenerativeLlmModel.OLLAMA_LLAMA3,
                 GenerativeLlmModel.OLLAMA_LLAMA3_1,
                 GenerativeLlmModel.OLLAMA_QWEN2_5,
-                GenerativeLlmModel.OLLAMA_DEEPSEEK_CODER
+                GenerativeLlmModel.OLLAMA_DEEPSEEK_CODER,
+                GenerativeLlmModel.OLLAMA_GEMMA_4_E4B
         );
     }
 

@@ -27,7 +27,14 @@ public class GeminiLlmProvider implements GenerativeLlmProvider {
 
     @Override
     public Set<GenerativeLlmModel> getSupportedModels() {
-        return Set.of(GenerativeLlmModel.GEMINI_1_5_FLASH);
+        return Set.of(
+                GenerativeLlmModel.GEMINI_1_5_FLASH,
+                GenerativeLlmModel.GEMINI_3_5_FLASH,
+                GenerativeLlmModel.GEMINI_2_5_FLASH,
+                GenerativeLlmModel.GEMINI_2_0_FLASH,
+                GenerativeLlmModel.GEMINI_2_5_FLASH_LITE,
+                GenerativeLlmModel.GEMINI_3_1_FLASH_LITE_PREVIEW
+        );
     }
 
     @Override
