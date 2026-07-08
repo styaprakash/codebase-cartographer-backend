@@ -27,9 +27,10 @@ public class GraphResponse {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class GraphNode{
-        private String id;     // e.g., "com.codebasecartographer.api.entity.User"
-        private String label;  // e.g., "User.java"
-        private String type;   // e.g., "CLASS", "INTERFACE", "CONTROLLER"
+        private String id;        // e.g., "src/components/App.tsx"
+        private String label;     // e.g., "App.tsx"
+        private String category;  // e.g., "component", "service", "utility", "config", "folder"
+        private String filePath;  // full path, same as id for files
     }
     
     // ── Inner class: GraphEdge ─────────────────────────────────────

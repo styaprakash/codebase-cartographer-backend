@@ -175,7 +175,7 @@ public class GlobalExceptionHandler {
     // Safety net — catches anything unhandled
     @ExceptionHandler(Throwable.class)
     public ProblemDetail handleGeneral(Throwable ex) {
-        log.error("Unhandled global exception", ex);
+        log.error("Unhandled exception caught by GlobalExceptionHandler: ", ex);
 
         ProblemDetail problem = ProblemDetail
             .forStatusAndDetail(HttpStatus.INTERNAL_SERVER_ERROR,
@@ -184,6 +184,11 @@ public class GlobalExceptionHandler {
         problem.setTitle("Internal Server Error");
         problem.setType(URI.create("https://codebasecartographer.com/errors/internal"));
         problem.setProperty("timestamp", LocalDateTime.now());
+
+        // Pass exception message for dev debugging
+        if (ex.getMessage() != null) {
+            problem.setDetail(ex.getMessage());
+        }
 
         return problem;
     }

@@ -1,8 +1,9 @@
 package com.codebasecartographer.api.service;
 
-import java.util.Collections;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
@@ -10,7 +11,6 @@ import org.springframework.stereotype.Service;
 import com.codebasecartographer.api.dto.response.GraphResponse;
 import com.codebasecartographer.api.dto.response.GraphResponse.GraphEdge;
 import com.codebasecartographer.api.dto.response.GraphResponse.GraphNode;
-import com.codebasecartographer.api.entity.CodeChunk;
 import com.codebasecartographer.api.entity.Repository;
 import com.codebasecartographer.api.enums.RepositoryStatus;
 import com.codebasecartographer.api.exception.BadRequestException;
@@ -25,9 +25,6 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 public class GraphService {
 
-    // Needs these two repositories:
-    // CodeChunkRepository → chunks contain file paths + import info
-    // RepositoryRepository → verify repo exists + ownership
     private final CodeChunkRepository codeChunkRepository;
     private final RepositoryRepository repositoryRepository;
 
@@ -37,28 +34,11 @@ public class GraphService {
         this.repositoryRepository = repositoryRepository;
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // PUBLIC METHODS
-    // ═══════════════════════════════════════════════════════════════
-
     // ── Main Method: getGraph ─────────────────────────────────────
-    // Called by GraphController on GET /api/repos/:id/graph
-    // Returns nodes + edges for React Flow to render
-    //
-    // Flow:
-    // 1. Verify repo exists + belongs to user
-    // 2. Verify repo is indexed (no chunks = no graph)
-    // 3. Fetch all chunks for this repo
-    // 4. Build nodes from unique file paths
-    // 5. Build edges from import relationships (Week 6)
-    // 6. Return GraphResponse
     public GraphResponse getGraph(String userId, String repoId) {
 
-        // Step 1 — Security: repo must exist + belong to this user
         Repository repo = verifyRepoAccess(userId, repoId);
 
-        // Step 2 — Repo must be fully indexed
-        // No chunks in DB = no graph to build
         if (repo.getStatus() != RepositoryStatus.INDEXED) {
             log.warn("Graph requested for non-indexed repo {} (status: {}) by user {}", repoId, repo.getStatus(), userId);
             throw new BadRequestException(
@@ -66,124 +46,138 @@ public class GraphService {
                 "Current status: " + repo.getStatus());
         }
 
-        // Step 3 — Fetch ALL chunks for this repo from DB
-        // Each chunk has: filePath, chunkType, chunkName, content
-        List<CodeChunk> allChunks = codeChunkRepository
-                .findByRepository_Id(repoId);
+        try {
+            // Use native query to avoid pgvector JDBC driver crash (PSQLException in TypeInfoCache)
+            List<String> filePaths = codeChunkRepository.findDistinctFilePathsByRepoId(repoId);
 
-        // Step 4 — Build nodes (one per unique file)
-        List<GraphNode> nodes = buildNodes(allChunks);
+            if (filePaths.isEmpty()) {
+                return GraphResponse.builder().nodes(List.of()).edges(List.of()).build();
+            }
 
-        // Step 5 — Build edges (import relationships between files)
-        // TODO Week 6: parse import statements from chunk content
-        List<GraphEdge> edges = buildEdges(allChunks);
+            List<GraphNode> nodes = buildNodes(filePaths);
+            List<GraphEdge> edges = buildEdges(filePaths);
 
-        return GraphResponse.builder()
-                .nodes(nodes)
-                .edges(edges)
-                .build();
+            return GraphResponse.builder()
+                    .nodes(nodes)
+                    .edges(edges)
+                    .build();
+        } catch (BadRequestException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Failed to build graph for repo {}: {}", repoId, e.getMessage(), e);
+            return GraphResponse.builder().nodes(List.of()).edges(List.of()).build();
+        }
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // PRIVATE METHODS
-    // ═══════════════════════════════════════════════════════════════
-
     // ── Build Nodes ───────────────────────────────────────────────
-    // Creates one GraphNode per unique file in the repo
-    //
-    // Why unique files?
-    // One file has MANY chunks (multiple functions/classes)
-    // But on the graph, each FILE = one node
-    // We group all chunks by filePath → one node per file
-    //
-    // Example:
-    // chunks: [auth.ts:login(), auth.ts:logout(), payment.ts:charge()]
-    // nodes:  [auth.ts node, payment.ts node]
-    private List<GraphNode> buildNodes(List<CodeChunk> chunks) {
+    // V1: File System Hierarchy Graph
+    // Creates folder nodes + file nodes from flat file paths
+    private List<GraphNode> buildNodes(List<String> filePaths) {
 
-        // Group chunks by filePath
-        // Map<filePath, List<CodeChunk>>
-        Map<String, List<CodeChunk>> byFile = chunks.stream()
-                .collect(Collectors.groupingBy(CodeChunk::getFilePath));
+        // Collect all unique paths: parent folders + files
+        Set<String> allPaths = new LinkedHashSet<>();
 
-        // Create one node per unique file
-        return byFile.entrySet().stream()
-                .map(entry -> {
-                    String filePath = entry.getKey();
-                    List<CodeChunk> fileChunks = entry.getValue();
+        for (String filePath : filePaths) {
+            // Add all parent directory segments
+            String[] parts = filePath.split("/");
+            StringBuilder currentPath = new StringBuilder();
+            for (int i = 0; i < parts.length - 1; i++) {
+                if (currentPath.length() > 0) {
+                    currentPath.append("/");
+                }
+                currentPath.append(parts[i]);
+                allPaths.add(currentPath.toString());
+            }
+            // Add the file itself
+            allPaths.add(filePath);
+        }
+
+        // Convert each path into a GraphNode
+        return allPaths.stream()
+                .map(path -> {
+                    boolean isFile = isFilePath(path);
+                    String label = isFile
+                            ? FileUtils.extractFileName(path)
+                            : extractFolderName(path);
+                    String category = isFile
+                            ? determineFileType(path)
+                            : "folder";
 
                     return GraphNode.builder()
-                            // id = full path e.g. "src/auth/login.ts"
-                            // React Flow uses this to connect edges
-                            .id(filePath)
-
-                            // label = just the filename e.g. "login.ts"
-                            // Shown inside the node bubble on graph
-                            .label(FileUtils.extractFileName(filePath))
-
-                            // type = determines node color on React Flow graph
-                            // COMPONENT → purple
-                            // SERVICE   → cyan
-                            // UTILITY   → green
-                            // CONFIG    → amber
-                            .type(determineNodeType(filePath, fileChunks))
-
+                            .id(path)
+                            .label(label)
+                            .category(category)
+                            .filePath(path)
                             .build();
                 })
                 .collect(Collectors.toList());
     }
 
     // ── Build Edges ───────────────────────────────────────────────
-    // Creates edges representing import relationships
-    //
-    // Example:
-    // login.ts has: import { auth } from './auth'
-    // Edge: login.ts → auth.ts
-    //
-    // React Flow draws a line between these two nodes
-    //
-    // Full logic requires parsing import statements from chunk content
-    // That's done in Week 6 after Tree-sitter is set up
-    private List<GraphEdge> buildEdges(List<CodeChunk> chunks) {
+    // V1: Directory hierarchy edges (parent folder → child folder/file)
+    private List<GraphEdge> buildEdges(List<String> filePaths) {
 
-        // TODO Week 6 — parse import statements from chunk content:
-        // 1. For each chunk, scan content for import lines
-        //    TypeScript: import { x } from './path'
-        //    Java:       import com.package.Class
-        //    Python:     from module import x
-        // 2. Resolve relative paths to absolute file paths
-        // 3. Check if target file exists in our chunks
-        // 4. Create GraphEdge(source=thisFile, target=importedFile)
+        Set<String> edgeKeys = new LinkedHashSet<>();
+        List<GraphEdge> edges = new ArrayList<>();
 
-        // For now — return empty list
-        // Graph will show nodes only, no connecting lines
-        // Week 6 fills this in
-        return Collections.emptyList();
+        for (String filePath : filePaths) {
+            // Walk up the path to create parent → child edges
+            String[] parts = filePath.split("/");
+            StringBuilder parentPath = new StringBuilder();
+
+            for (int i = 0; i < parts.length - 1; i++) {
+                String segment = parts[i];
+                String childPath;
+
+                if (parentPath.length() > 0) {
+                    parentPath.append("/");
+                    parentPath.append(segment);
+                    childPath = parentPath.toString();
+                } else {
+                    childPath = segment;
+                    parentPath = new StringBuilder(segment);
+                }
+
+                // Determine the target: if this is the last segment before the file,
+                // target is the file itself; otherwise target is the intermediate folder
+                String target;
+                if (i == parts.length - 2) {
+                    // Last parent segment → target is the file
+                    target = filePath;
+                } else {
+                    // Intermediate folder → target is the next folder level
+                    target = childPath;
+                }
+
+                String source = (i == 0) ? segment : parentPath.toString();
+                String edgeKey = source + "->" + target;
+
+                if (edgeKeys.add(edgeKey)) {
+                    edges.add(GraphEdge.builder()
+                            .id(edgeKey)
+                            .source(source)
+                            .target(target)
+                            .build());
+                }
+            }
+        }
+
+        return edges;
     }
 
-    // ── Determine Node Type ───────────────────────────────────────
-    // Decides the color category of each file node
-    // Based on file path conventions — not AI guessing
-    //
-    // Why path-based detection?
-    // Developers follow conventions:
-    // files in /components/ → React components → COMPONENT
-    // files in /services/   → business logic   → SERVICE
-    // files in /utils/      → helper functions → UTILITY
-    // config files          → configuration    → CONFIG
-    private String determineNodeType(String filePath,
-                                      List<CodeChunk> fileChunks) {
+    // ── Determine File Type ───────────────────────────────────────
+    // Path-based heuristic for file category (no entity loading needed)
+    private String determineFileType(String filePath) {
 
         String path = filePath.toLowerCase();
 
-        // Check path segments for known conventions
         if (path.contains("/component") ||
             path.contains("/components") ||
             path.contains("/view") ||
             path.contains("/views") ||
             path.contains("/page") ||
             path.contains("/pages")) {
-            return "COMPONENT";     // purple on graph
+            return "component";
         }
 
         if (path.contains("/service") ||
@@ -191,7 +185,7 @@ public class GraphService {
             path.contains("/api") ||
             path.contains("/controller") ||
             path.contains("/repository")) {
-            return "SERVICE";       // cyan on graph
+            return "service";
         }
 
         if (path.contains("/util") ||
@@ -199,7 +193,7 @@ public class GraphService {
             path.contains("/helper") ||
             path.contains("/helpers") ||
             path.contains("/common")) {
-            return "UTILITY";       // green on graph
+            return "utility";
         }
 
         if (path.contains("config") ||
@@ -208,28 +202,32 @@ public class GraphService {
             path.endsWith(".yml") ||
             path.endsWith(".properties") ||
             path.endsWith(".env")) {
-            return "CONFIG";        // amber on graph
+            return "config";
         }
 
-        // Default — couldn't determine type
-        return "UNKNOWN";           // gray on graph
+        return "utility";
     }
 
-    // Returns list of unique file paths for the file tree (left panel)
+    // ── Helpers ───────────────────────────────────────────────────
+
+    private boolean isFilePath(String path) {
+        int lastSlash = path.lastIndexOf('/');
+        String name = (lastSlash >= 0) ? path.substring(lastSlash + 1) : path;
+        return name.contains(".");
+    }
+
+    private String extractFolderName(String folderPath) {
+        int lastSlash = folderPath.lastIndexOf('/');
+        return (lastSlash >= 0) ? folderPath.substring(lastSlash + 1) : folderPath;
+    }
+
+    // ── getFilePaths ──────────────────────────────────────────────
     public List<String> getFilePaths(String userId, String repoId) {
-
-        // Security check first
         verifyRepoAccess(userId, repoId);
-
-        // Use native query to get distinct file paths directly from DB.
-        // Avoids loading full CodeChunk entities (with pgvector embedding column
-        // which crashes the PostgreSQL JDBC driver — PSQLException in TypeInfoCache).
         return codeChunkRepository.findDistinctFilePathsByRepoId(repoId);
     }
+
     // ── Verify Repo Access ────────────────────────────────────────
-    // Security check reused across all public methods
-    // Ensures repo exists AND belongs to this specific user
-    // Prevents user A from seeing user B's dependency graph
     private Repository verifyRepoAccess(String userId, String repoId) {
         return repositoryRepository
                 .findByUserIdAndId(userId, repoId)
