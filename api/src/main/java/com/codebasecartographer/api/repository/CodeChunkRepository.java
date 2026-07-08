@@ -51,14 +51,24 @@ public interface CodeChunkRepository extends JpaRepository<CodeChunk, String> {
 
     // pgvector cosine similarity search — scoped to one repo
     // The <=> operator is pgvector's cosine distance
+    // Returns List<Object[]> instead of List<CodeChunk> to avoid loading the embedding column,
+    // which crashes the PostgreSQL JDBC driver (PSQLException in TypeInfoCache).
     @Query(value = """
-        SELECT * FROM code_chunks
-        WHERE repo_id = :repoId
-        AND embedding IS NOT NULL
-        ORDER BY embedding <=> CAST(:queryVector AS vector)
+        SELECT
+            c.id,
+            c.content,
+            c.file_path,
+            c.start_line,
+            c.end_line,
+            c.chunk_type,
+            c.chunk_name
+        FROM code_chunks c
+        WHERE c.repo_id = :repoId
+        AND c.embedding IS NOT NULL
+        ORDER BY c.embedding <=> CAST(:queryVector AS vector)
         LIMIT :limit
         """, nativeQuery = true)
-    List<CodeChunk> findTopSimilarChunks(
+    List<Object[]> findTopSimilarChunks(
         @Param("repoId") String repoId,
         @Param("queryVector") String queryVector,
         @Param("limit") int limit);
