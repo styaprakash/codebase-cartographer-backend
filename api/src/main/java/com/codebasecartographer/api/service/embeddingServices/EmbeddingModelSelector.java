@@ -20,13 +20,27 @@ public class EmbeddingModelSelector {
 
     /**
      * Selects an embedding model for a new repository.
-     * Strategy: return the first enabled model with a registered provider.
+     * Strategy: prefer local Ollama (QWEN3_EMBEDDING) for cost/latency,
+     * then fall back to remote APIs in enum order.
      * Future: add load-based, latency-based, or round-robin strategies.
      */
     public EmbeddingModel selectModel() {
         Set<EmbeddingModel> available = providerFactory.getAvailableModels();
 
-        // Prefer enabled models that have a registered provider
+        if (available.isEmpty()) {
+            throw new IllegalStateException(
+                    "No embedding providers available. Configure at least one of: "
+                    + "OPENROUTER_API_KEY, GEMINI_API_KEY, or start Ollama on port 11434");
+        }
+
+        // Prefer local Ollama first for cost and latency benefits
+        EmbeddingModel localModel = EmbeddingModel.QWEN3_EMBEDDING;
+        if (localModel.isEnabled() && available.contains(localModel)) {
+            log.info("Selected embedding model (local priority): {}", localModel);
+            return localModel;
+        }
+
+        // Fall back to remote APIs in enum order
         for (EmbeddingModel model : EmbeddingModel.values()) {
             if (model.isEnabled() && available.contains(model)) {
                 log.info("Selected embedding model: {}", model);
@@ -35,7 +49,7 @@ public class EmbeddingModelSelector {
         }
 
         throw new IllegalStateException(
-                "No enabled embedding model with a registered provider. "
-                + "Available providers: " + available);
+                "No embedding providers available. Configure at least one of: "
+                + "OPENROUTER_API_KEY, GEMINI_API_KEY, or start Ollama on port 11434");
     }
 }

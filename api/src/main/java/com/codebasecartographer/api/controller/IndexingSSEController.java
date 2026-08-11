@@ -4,8 +4,10 @@ import java.io.IOException;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.event.EventListener;
 import org.springframework.http.MediaType;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -14,8 +16,13 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import com.codebasecartographer.api.enums.RepositoryStatus;
+import com.codebasecartographer.api.entity.Repository;
 import com.codebasecartographer.api.event.IndexingFileEvent;
 import com.codebasecartographer.api.event.IndexingStatusEvent;
+import com.codebasecartographer.api.repository.RepositoryRepository;
+import java.util.HashMap;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -25,16 +32,17 @@ import lombok.extern.slf4j.Slf4j;
 @RequestMapping("/api/sse")
 public class IndexingSSEController {
 
+    //use a Thread-safe map (dictionary)
     private final Map<String, SseEmitter> emitters = new ConcurrentHashMap<>();
-    private final com.codebasecartographer.api.repository.RepositoryRepository repositoryRepository;
+    private final RepositoryRepository repositoryRepository;
 
-    public IndexingSSEController(com.codebasecartographer.api.repository.RepositoryRepository repositoryRepository) {
+    public IndexingSSEController(RepositoryRepository repositoryRepository) {
         this.repositoryRepository = repositoryRepository;
     }
 
     @SuppressWarnings("null")
     @GetMapping(value = "/indexing/{repoId}", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter stream(@PathVariable String repoId, jakarta.servlet.http.HttpServletResponse response) {
+    public SseEmitter stream(@PathVariable String repoId, HttpServletResponse response) {
         response.setHeader("Cache-Control", "no-cache");
         response.setHeader("X-Accel-Buffering", "no");
         response.setHeader("Connection", "keep-alive");
@@ -54,16 +62,16 @@ public class IndexingSSEController {
 
             // Best Practice: Check the database immediately upon connection to prevent race conditions
             // where the background job finishes before the frontend establishes the SSE connection.
-            java.util.Optional<com.codebasecartographer.api.entity.Repository> optRepo = repositoryRepository.findById(repoId);
+            Optional<Repository> optRepo = repositoryRepository.findById(repoId);
             if (optRepo.isPresent()) {
-                com.codebasecartographer.api.entity.Repository repo = optRepo.get();
+                Repository repo = optRepo.get();
                 if (repo.getStatus() == RepositoryStatus.INDEXED || repo.getStatus() == RepositoryStatus.FAILED) {
                     // Schedule sending the terminal event on a separate thread to ensure
                     // Spring MVC has time to return the emitter and write the HTTP 200 OK headers first.
-                    java.util.concurrent.CompletableFuture.runAsync(() -> {
+                    CompletableFuture.runAsync(() -> {
                         try {
                             Thread.sleep(100);
-                            Map<String, Object> data = new java.util.HashMap<>();
+                            Map<String, Object> data = new HashMap<>();
                             data.put("status", repo.getStatus().name());
                             if (repo.getErrorMessage() != null) {
                                 data.put("errorMessage", repo.getErrorMessage());
@@ -144,7 +152,7 @@ public class IndexingSSEController {
         if (emitter != null) {
             synchronized (emitter) {
                 try {
-                    Map<String, Object> data = new java.util.HashMap<>();
+                    Map<String, Object> data = new HashMap<>();
                     data.put("status", event.getStatus().name());
                     if (event.getErrorMessage() != null) {
                         data.put("errorMessage", event.getErrorMessage());
@@ -169,5 +177,24 @@ public class IndexingSSEController {
                 }
             }
         }
+    }
+
+    /**
+     * Sends a keep-alive ping every 15 seconds to all open SSE connections.
+     * This prevents intermediate reverse-proxies (like Nginx, AWS ALB, Cloudflare)
+     * from forcefully closing the connection due to idle timeouts.
+     */
+    @Scheduled(fixedRate = 15000)
+    public void sendHeartbeat() {
+        emitters.forEach((repoId, emitter) -> {
+            try {
+                // Sending an empty comment ":" acts as a network heartbeat without triggering any client-side JavaScript events
+                emitter.send(SseEmitter.event().comment("ping"));
+            } catch (IOException e) {
+                // If the heartbeat fails, the connection is dead. Remove it to prevent memory leaks.
+                log.debug("SSE Heartbeat failed for repo {}. Removing dead connection.", repoId);
+                emitters.remove(repoId);
+            }
+        });
     }
 }

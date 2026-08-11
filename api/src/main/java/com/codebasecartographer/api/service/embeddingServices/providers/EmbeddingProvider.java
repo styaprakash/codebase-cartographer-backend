@@ -13,6 +13,9 @@ public interface EmbeddingProvider {
     // Which enum constant this provider serves
     EmbeddingModel getModel();
 
+    // Whether this provider is available (API key present, service reachable, etc.)
+    default boolean isEnabled() { return true; }
+
     // Single text → vector
     float[] embed(String text);
 

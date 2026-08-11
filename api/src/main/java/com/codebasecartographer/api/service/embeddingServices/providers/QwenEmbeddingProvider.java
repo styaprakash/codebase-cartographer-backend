@@ -1,5 +1,6 @@
 package com.codebasecartographer.api.service.embeddingServices.providers;
 
+import java.time.Duration;
 import java.util.List;
 
 import org.springframework.stereotype.Component;
@@ -10,12 +11,14 @@ import com.codebasecartographer.api.dto.response.EmbeddingResponse;
 import com.codebasecartographer.api.enums.EmbeddingModel;
 
 import io.github.resilience4j.bulkhead.annotation.Bulkhead;
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @Component
 public class QwenEmbeddingProvider implements EmbeddingProvider {
     private final RestClient restClient;
+    private boolean enabled = false;
 
     public QwenEmbeddingProvider(RestClient.Builder builder) {
         this.restClient = builder
@@ -27,26 +30,54 @@ public class QwenEmbeddingProvider implements EmbeddingProvider {
                 .build();
     }
 
+    @PostConstruct
+    public void init() {
+        RestClient pingClient = RestClient.builder()
+                .baseUrl("http://localhost:11434")
+                .requestFactory(new org.springframework.http.client.SimpleClientHttpRequestFactory() {{
+                    setConnectTimeout(2000);
+                    setReadTimeout(2000);
+                }})
+                .build();
+        try {
+            pingClient.get()
+                    .uri("/api/tags")
+                    .retrieve()
+                    .toBodilessEntity();
+            enabled = true;
+            log.info("Ollama enabled");
+        } catch (Exception e) {
+            enabled = false;
+            log.warn("Ollama disabled: not reachable at localhost:11434");
+        }
+    }
+
     @Override
     public EmbeddingModel getModel() {
         return EmbeddingModel.QWEN3_EMBEDDING;
     }
 
-    // Single text embedding (uses batch with single item)
     @Override
-    // Bulkhead limits concurrent calls to the Local Ollama instance.
-    // Annotated on both embed and embedBatch to ensure AOP proxies intercept external calls to either method.
+    public boolean isEnabled() {
+        return enabled;
+    }
+
+    @Override
     @Bulkhead(name = "local-ollama")
     public float[] embed(String text) {
+        if (!enabled) {
+            throw new IllegalStateException("Ollama provider is disabled: not reachable at localhost:11434");
+        }
         return embedBatch(List.of(text)).get(0);
     }
 
-    // Batch embedding
     @Override
-    // Bulkhead limits concurrent calls to the Local Ollama instance.
-    // Annotated on both embed and embedBatch to ensure AOP proxies intercept external calls to either method.
     @Bulkhead(name = "local-ollama")
     public List<float[]> embedBatch(List<String> texts) {
+        if (!enabled) {
+            throw new IllegalStateException("Ollama provider is disabled: not reachable at localhost:11434");
+        }
+
         EmbeddingModel model = getModel();
         EmbeddingResponse response = restClient.post()
                 .uri("/api/embed")

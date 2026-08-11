@@ -11,18 +11,33 @@ import com.codebasecartographer.api.enums.GenerativeLlmModel;
 
 import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
 import io.github.resilience4j.retry.annotation.Retry;
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @Component
 public class OpenAiLlmProvider implements GenerativeLlmProvider {
     private final RestClient restClient;
+    private final String apiKey;
+    private boolean enabled = false;
 
-    public OpenAiLlmProvider(RestClient.Builder builder, @Value("${openai.api.key:dummy}") String apiKey) {
+    public OpenAiLlmProvider(RestClient.Builder builder, @Value("${openai.api.key:}") String apiKey) {
+        this.apiKey = apiKey;
         this.restClient = builder
                 .baseUrl("https://api.openai.com/v1")
                 .defaultHeader("Authorization", "Bearer " + apiKey)
                 .build();
+    }
+
+    @PostConstruct
+    public void init() {
+        if (apiKey == null || apiKey.isBlank()) {
+            log.warn("OpenAI LLM disabled: no API key configured");
+            enabled = false;
+            return;
+        }
+        enabled = true;
+        log.info("OpenAI LLM enabled");
     }
 
     @Override
@@ -31,9 +46,18 @@ public class OpenAiLlmProvider implements GenerativeLlmProvider {
     }
 
     @Override
+    public boolean isEnabled() {
+        return enabled;
+    }
+
+    @Override
     @RateLimiter(name = "premium-api")
     @Retry(name = "premium-api")
     public String generateResponse(GenerativeLlmModel model, String prompt) {
+        if (!enabled) {
+            throw new IllegalStateException("OpenAI provider is disabled: no API key");
+        }
+
         log.info("Generating response using {} (tag={})", model, model.getModelTag());
 
         OpenAiRequest request = new OpenAiRequest(model.getModelTag(), List.of(new Message("user", prompt)));

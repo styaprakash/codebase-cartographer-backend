@@ -10,29 +10,53 @@ import com.codebasecartographer.api.enums.EmbeddingModel;
 
 import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
 import io.github.resilience4j.retry.annotation.Retry;
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @Component
 public class GeminiEmbeddingProvider implements EmbeddingProvider {
     private final RestClient restClient;
+    private final String apiKey;
+    private boolean enabled = false;
 
     public GeminiEmbeddingProvider(RestClient.Builder builder, @Value("${gemini.api.key:dummy}") String apiKey) {
+        this.apiKey = apiKey;
         this.restClient = builder
                 .baseUrl("https://generativelanguage.googleapis.com/v1beta/models")
                 .defaultHeader("x-goog-api-key", apiKey)
                 .build();
     }
 
+    @PostConstruct
+    public void init() {
+        if (apiKey == null || apiKey.isBlank() || apiKey.equals("dummy") || apiKey.equals("your-gemini-api-key-here")) {
+            log.warn("Gemini disabled: no API key configured");
+            enabled = false;
+            return;
+        }
+        enabled = true;
+        log.info("Gemini enabled");
+    }
+
     @Override
     public EmbeddingModel getModel() {
-        return EmbeddingModel.GEMINI_EMBEDDING; // Or whichever enum maps to this
+        return EmbeddingModel.GEMINI_EMBEDDING;
+    }
+
+    @Override
+    public boolean isEnabled() {
+        return enabled;
     }
 
     @Override
     @RateLimiter(name = "premium-api")
     @Retry(name = "premium-api")
     public float[] embed(String text) {
+        if (!enabled) {
+            throw new IllegalStateException("Gemini provider is disabled: no API key");
+        }
+
         log.debug("Generating embedding using Gemini (text-embedding-004)");
 
         GeminiEmbeddingRequest request = new GeminiEmbeddingRequest(

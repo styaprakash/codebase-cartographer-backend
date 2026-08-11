@@ -11,18 +11,33 @@ import com.codebasecartographer.api.enums.GenerativeLlmModel;
 
 import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
 import io.github.resilience4j.retry.annotation.Retry;
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @Component
 public class GeminiLlmProvider implements GenerativeLlmProvider {
     private final RestClient restClient;
+    private final String apiKey;
+    private boolean enabled = false;
 
-    public GeminiLlmProvider(RestClient.Builder builder, @Value("${gemini.api.key:dummy}") String apiKey) {
+    public GeminiLlmProvider(RestClient.Builder builder, @Value("${gemini.api.key:}") String apiKey) {
+        this.apiKey = apiKey;
         this.restClient = builder
                 .baseUrl("https://generativelanguage.googleapis.com/v1beta/models")
                 .defaultHeader("x-goog-api-key", apiKey)
                 .build();
+    }
+
+    @PostConstruct
+    public void init() {
+        if (apiKey == null || apiKey.isBlank()) {
+            log.warn("Gemini LLM disabled: no API key configured");
+            enabled = false;
+            return;
+        }
+        enabled = true;
+        log.info("Gemini LLM enabled");
     }
 
     @Override
@@ -38,9 +53,18 @@ public class GeminiLlmProvider implements GenerativeLlmProvider {
     }
 
     @Override
+    public boolean isEnabled() {
+        return enabled;
+    }
+
+    @Override
     @RateLimiter(name = "premium-api")
     @Retry(name = "premium-api")
     public String generateResponse(GenerativeLlmModel model, String prompt) {
+        if (!enabled) {
+            throw new IllegalStateException("Gemini provider is disabled: no API key");
+        }
+
         log.info("Generating response using {} (tag={})", model, model.getModelTag());
 
         GeminiRequest request = new GeminiRequest(List.of(new Content(List.of(new Part(prompt)))));

@@ -15,4 +15,7 @@ public interface GenerativeLlmProvider {
 
     // Generate a response using the specified model
     String generateResponse(GenerativeLlmModel model, String prompt);
+
+    // Whether this provider is available (API key present, service reachable, etc.)
+    default boolean isEnabled() { return true; }
 }

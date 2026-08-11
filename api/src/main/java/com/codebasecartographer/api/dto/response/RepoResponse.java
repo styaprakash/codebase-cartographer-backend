@@ -3,6 +3,7 @@ package com.codebasecartographer.api.dto.response;
 import java.time.LocalDateTime;
 
 import com.codebasecartographer.api.enums.RepositoryStatus;
+import com.codebasecartographer.api.enums.EmbeddingModel;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -21,7 +22,7 @@ public class RepoResponse {
     private String fullName;
     private String branch;
     private String language;
-    private com.codebasecartographer.api.enums.EmbeddingModel embeddingModel;
+    private EmbeddingModel embeddingModel;
     private RepositoryStatus status;
     private Integer totalFiles;
     private Integer indexedFiles;

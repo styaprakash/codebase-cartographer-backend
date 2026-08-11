@@ -11,6 +11,7 @@ import com.codebasecartographer.api.enums.GenerativeLlmModel;
 
 import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
 import io.github.resilience4j.retry.annotation.Retry;
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -21,13 +22,27 @@ import lombok.extern.slf4j.Slf4j;
 @Component
 public class DeepSeekLlmProvider implements GenerativeLlmProvider {
     private final RestClient restClient;
+    private final String apiKey;
+    private boolean enabled = false;
 
-    public DeepSeekLlmProvider(RestClient.Builder builder, @Value("${deepseek.api-key:dummy}") String apiKey) {
+    public DeepSeekLlmProvider(RestClient.Builder builder, @Value("${deepseek.api-key:}") String apiKey) {
+        this.apiKey = apiKey;
         this.restClient = builder
                 .baseUrl("https://api.deepseek.com")
                 .defaultHeader("Authorization", "Bearer " + apiKey)
                 .defaultHeader("Content-Type", "application/json")
                 .build();
+    }
+
+    @PostConstruct
+    public void init() {
+        if (apiKey == null || apiKey.isBlank()) {
+            log.warn("DeepSeek LLM disabled: no API key configured");
+            enabled = false;
+            return;
+        }
+        enabled = true;
+        log.info("DeepSeek LLM enabled");
     }
 
     @Override
@@ -36,9 +51,18 @@ public class DeepSeekLlmProvider implements GenerativeLlmProvider {
     }
 
     @Override
+    public boolean isEnabled() {
+        return enabled;
+    }
+
+    @Override
     @RateLimiter(name = "premium-api")
     @Retry(name = "premium-api")
     public String generateResponse(GenerativeLlmModel model, String prompt) {
+        if (!enabled) {
+            throw new IllegalStateException("DeepSeek provider is disabled: no API key");
+        }
+
         log.info("Generating response using {} (tag={})", model, model.getModelTag());
 
         DeepSeekRequest request = new DeepSeekRequest(

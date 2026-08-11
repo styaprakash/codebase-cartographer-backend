@@ -11,6 +11,7 @@ import com.codebasecartographer.api.enums.GenerativeLlmModel;
 
 import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
 import io.github.resilience4j.retry.annotation.Retry;
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -22,14 +23,28 @@ import lombok.extern.slf4j.Slf4j;
 @Component
 public class OpenRouterLlmProvider implements GenerativeLlmProvider {
     private final RestClient restClient;
+    private final String apiKey;
+    private boolean enabled = false;
 
     public OpenRouterLlmProvider(RestClient.Builder builder,
-                                  @Value("${openrouter.api.key:dummy}") String apiKey) {
+                                  @Value("${openrouter.api.key:}") String apiKey) {
+        this.apiKey = apiKey;
         this.restClient = builder
                 .baseUrl("https://openrouter.ai/api/v1")
                 .defaultHeader("Authorization", "Bearer " + apiKey)
                 .defaultHeader("Content-Type", "application/json")
                 .build();
+    }
+
+    @PostConstruct
+    public void init() {
+        if (apiKey == null || apiKey.isBlank()) {
+            log.warn("OpenRouter LLM disabled: no API key configured");
+            enabled = false;
+            return;
+        }
+        enabled = true;
+        log.info("OpenRouter LLM enabled");
     }
 
     @Override
@@ -43,9 +58,18 @@ public class OpenRouterLlmProvider implements GenerativeLlmProvider {
     }
 
     @Override
+    public boolean isEnabled() {
+        return enabled;
+    }
+
+    @Override
     @RateLimiter(name = "premium-api")
     @Retry(name = "premium-api")
     public String generateResponse(GenerativeLlmModel model, String prompt) {
+        if (!enabled) {
+            throw new IllegalStateException("OpenRouter provider is disabled: no API key");
+        }
+
         log.info("Generating response using {} (tag={})", model, model.getModelTag());
 
         OpenRouterRequest request = new OpenRouterRequest(

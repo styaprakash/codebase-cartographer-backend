@@ -23,10 +23,23 @@ public class LlmProviderFactory {
     public LlmProviderFactory(List<GenerativeLlmProvider> providerList) {
         for (GenerativeLlmProvider provider : providerList) {
             for (GenerativeLlmModel model : provider.getSupportedModels()) {
-                providers.put(model, provider);
-                log.info("Registered LLM provider: {} → {} (enabled={})",
-                        model, provider.getClass().getSimpleName(), model.isEnabled());
+                if (provider.isEnabled()) {
+                    providers.put(model, provider);
+                    log.info("Registered LLM provider: {} → {} (enabled=true)",
+                            model, provider.getClass().getSimpleName());
+                } else {
+                    log.warn("Skipped disabled LLM provider: {} → {} (enabled=false)",
+                            model, provider.getClass().getSimpleName());
+                }
             }
+        }
+
+        if (providers.isEmpty()) {
+            log.error("No LLM providers available. Configure at least one of: "
+                    + "OPENAI_API_KEY, OPENROUTER_API_KEY, GEMINI_API_KEY, DEEPSEEK_API_KEY, "
+                    + "NVIDIA_API_KEY, or start Ollama on port 11434");
+        } else {
+            log.info("Enabled LLM providers: {}", providers.keySet());
         }
     }
 

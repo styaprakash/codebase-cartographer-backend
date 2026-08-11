@@ -157,6 +157,7 @@ public class RepoService {
         repo.setTotalFiles(0);
         repo.setErrorMessage(null);
         repo.setStatus(RepositoryStatus.PENDING);
+        repo.setEmbeddingModel(null);
         repositoryRepository.save(repo);
     }
 

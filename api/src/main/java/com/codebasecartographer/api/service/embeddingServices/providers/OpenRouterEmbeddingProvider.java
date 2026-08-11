@@ -18,6 +18,7 @@ import lombok.extern.slf4j.Slf4j;
 public class OpenRouterEmbeddingProvider implements EmbeddingProvider {
     private final RestClient restClient;
     private final String apiKey;
+    private boolean enabled = false;
 
     public OpenRouterEmbeddingProvider(RestClient.Builder builder, @Value("${openrouter.api.key:dummy}") String apiKey) {
         this.apiKey = apiKey;
@@ -29,26 +30,14 @@ public class OpenRouterEmbeddingProvider implements EmbeddingProvider {
     }
 
     @PostConstruct
-    public void validateApiKey() {
-        if (apiKey == null || apiKey.isBlank() || apiKey.equals("dummy") || apiKey.equals("your-openrouter-api-key-here")) {
-            log.error("CRITICAL: OpenRouter API key is missing. Set OPENROUTER_API_KEY env var.");
-            throw new IllegalStateException("OpenRouter API key is not configured.");
+    public void init() {
+        if (apiKey == null || apiKey.isBlank() || apiKey.equals("dummy") || apiKey.equals("your-openai-api-key-here")) {
+            log.warn("OpenRouter disabled: no API key configured");
+            enabled = false;
+            return;
         }
-        // Mask the key for logging: show first 8 and last 4 characters
-        String masked = apiKey.substring(0, Math.min(8, apiKey.length()))
-                + "..." + apiKey.substring(Math.max(0, apiKey.length() - 4));
-        log.info("OpenRouter API key loaded: {} (length={})", masked, apiKey.length());
-
-        // Live validation — single-text embed call to confirm key is active
-        try {
-            float[] probe = embed("health check");
-            log.info("OpenRouter API key validated — embedding returned {} dimensions", probe.length);
-        } catch (Exception e) {
-            log.error("CRITICAL: OpenRouter API key is INVALID ({}). "
-                    + "Set a valid OPENROUTER_API_KEY env var. "
-                    + "The app will start but OpenRouter embeddings will fail at runtime.",
-                    e.getMessage());
-        }
+        enabled = true;
+        log.info("OpenRouter enabled");
     }
 
     @Override
@@ -57,7 +46,15 @@ public class OpenRouterEmbeddingProvider implements EmbeddingProvider {
     }
 
     @Override
+    public boolean isEnabled() {
+        return enabled;
+    }
+
+    @Override
     public float[] embed(String text) {
+        if (!enabled) {
+            throw new IllegalStateException("OpenRouter provider is disabled: no API key");
+        }
         return embedBatch(List.of(text)).get(0);
     }
 
@@ -65,6 +62,10 @@ public class OpenRouterEmbeddingProvider implements EmbeddingProvider {
     @RateLimiter(name = "premium-api")
     @Retry(name = "premium-api")
     public List<float[]> embedBatch(List<String> texts) {
+        if (!enabled) {
+            throw new IllegalStateException("OpenRouter provider is disabled: no API key");
+        }
+
         log.debug("Generating batch embeddings using OpenRouter ({})", getModel().getModelTag());
 
         OpenRouterEmbeddingRequest request = new OpenRouterEmbeddingRequest(getModel().getModelTag(), texts);

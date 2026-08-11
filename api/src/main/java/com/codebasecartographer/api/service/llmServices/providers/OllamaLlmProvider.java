@@ -8,6 +8,7 @@ import org.springframework.web.client.RestClient;
 import com.codebasecartographer.api.enums.GenerativeLlmModel;
 
 import io.github.resilience4j.bulkhead.annotation.Bulkhead;
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -19,11 +20,34 @@ import lombok.extern.slf4j.Slf4j;
 @Component
 public class OllamaLlmProvider implements GenerativeLlmProvider {
     private final RestClient restClient;
+    private boolean enabled = false;
 
     public OllamaLlmProvider(RestClient.Builder builder) {
         this.restClient = builder
                 .baseUrl("http://localhost:11434")
                 .build();
+    }
+
+    @PostConstruct
+    public void init() {
+        RestClient pingClient = RestClient.builder()
+                .baseUrl("http://localhost:11434")
+                .requestFactory(new org.springframework.http.client.SimpleClientHttpRequestFactory() {{
+                    setConnectTimeout(2000);
+                    setReadTimeout(2000);
+                }})
+                .build();
+        try {
+            pingClient.get()
+                    .uri("/api/tags")
+                    .retrieve()
+                    .toBodilessEntity();
+            enabled = true;
+            log.info("Ollama LLM enabled");
+        } catch (Exception e) {
+            enabled = false;
+            log.warn("Ollama LLM disabled: not reachable at localhost:11434");
+        }
     }
 
     @Override
@@ -38,8 +62,17 @@ public class OllamaLlmProvider implements GenerativeLlmProvider {
     }
 
     @Override
+    public boolean isEnabled() {
+        return enabled;
+    }
+
+    @Override
     @Bulkhead(name = "local-ollama")
     public String generateResponse(GenerativeLlmModel model, String prompt) {
+        if (!enabled) {
+            throw new IllegalStateException("Ollama provider is disabled: not reachable at localhost:11434");
+        }
+
         log.info("Generating response using {} (tag={})", model, model.getModelTag());
 
         OllamaRequest request = new OllamaRequest(model.getModelTag(), prompt, false);
