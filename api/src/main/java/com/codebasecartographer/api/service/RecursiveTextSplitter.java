@@ -1,5 +1,6 @@
 package com.codebasecartographer.api.service;
 
+import java.util.regex.Pattern;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -109,7 +110,7 @@ public class RecursiveTextSplitter {
             // Empty separator = split every character (last resort)
             return hardSplit(text);
         } else {
-            splits = text.split(java.util.regex.Pattern.quote(separator), -1);
+            splits = text.split(Pattern.quote(separator), -1);
         }
 
         // Merge small splits back together until they approach CHUNK_SIZE

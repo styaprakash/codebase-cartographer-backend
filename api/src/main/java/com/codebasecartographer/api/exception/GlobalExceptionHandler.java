@@ -70,8 +70,8 @@ public class GlobalExceptionHandler {
     }
 
     // Handle custom BadRequestException
-    @ExceptionHandler(com.codebasecartographer.api.exception.BadRequestException.class)
-    public ProblemDetail handleBadRequestCustom(com.codebasecartographer.api.exception.BadRequestException ex) {
+    @ExceptionHandler(BadRequestException.class)
+    public ProblemDetail handleBadRequestCustom(BadRequestException ex) {
         log.warn("Bad request: {}", ex.getMessage());
         ProblemDetail problem = ProblemDetail
             .forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
@@ -98,8 +98,8 @@ public class GlobalExceptionHandler {
     }
 
     // Handle duplicate resource errors specifically
-    @ExceptionHandler(com.codebasecartographer.api.exception.DuplicateResourceException.class)
-    public ProblemDetail handleDuplicate(com.codebasecartographer.api.exception.DuplicateResourceException ex){
+    @ExceptionHandler(DuplicateResourceException.class)
+    public ProblemDetail handleDuplicate(DuplicateResourceException ex){
         log.warn("Duplicate resource: {}", ex.getMessage());
         ProblemDetail problem = ProblemDetail
             .forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
@@ -151,8 +151,8 @@ public class GlobalExceptionHandler {
     // codes (like 400 Bad Request or 404 Not Found) into our standardized ProblemDetail
     // format. This prevents the Spring framework from treating the failure as an unhandled
     // exception, which would sever the SSE stream and return an opaque 500 Internal Server Error.
-    @ExceptionHandler(com.codebasecartographer.api.exception.GithubApiException.class)
-    public ProblemDetail handleGithubApi(com.codebasecartographer.api.exception.GithubApiException ex){
+    @ExceptionHandler(GithubApiException.class)
+    public ProblemDetail handleGithubApi(GithubApiException ex){
         log.error("GitHub API error: {}", ex.getMessage());
         
         // Map GitHub's status code to the closest Spring HttpStatus equivalent

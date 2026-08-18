@@ -1,5 +1,6 @@
 package com.codebasecartographer.api.service.llmServices.providers;
 
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import java.util.Set;
 
 import org.springframework.stereotype.Component;
@@ -32,7 +33,7 @@ public class OllamaLlmProvider implements GenerativeLlmProvider {
     public void init() {
         RestClient pingClient = RestClient.builder()
                 .baseUrl("http://localhost:11434")
-                .requestFactory(new org.springframework.http.client.SimpleClientHttpRequestFactory() {{
+                .requestFactory(new SimpleClientHttpRequestFactory() {{
                     setConnectTimeout(2000);
                     setReadTimeout(2000);
                 }})

@@ -678,7 +678,7 @@ public class IndexingService {
             return;
         }
 
-        log.info("Generating {} missing for repo {}", chunks.size(), repoId);
+        log.info("Generating {} missing chunks for repo {}", chunks.size(), repoId);
 
         for (CodeChunk chunk : chunks) {
             try {

@@ -1,5 +1,6 @@
 package com.codebasecartographer.api.service;
 
+import java.util.Base64;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -83,7 +84,7 @@ public class GitHubFileService {
             String encoded = response.get("content").asText()
                             .replaceAll("\\s", ""); //remove newlines from base64
 
-            return new String(java.util.Base64.getDecoder().decode(encoded));
+            return new String(Base64.getDecoder().decode(encoded));
 
         }catch(Exception e){
             return null; // Skip files that can't be fetched (deleted, too large etc.)

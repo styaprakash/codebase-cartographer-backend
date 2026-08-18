@@ -1,5 +1,6 @@
 package com.codebasecartographer.api.service.embeddingServices.providers;
 
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import java.time.Duration;
 import java.util.List;
 
@@ -23,7 +24,7 @@ public class QwenEmbeddingProvider implements EmbeddingProvider {
     public QwenEmbeddingProvider(RestClient.Builder builder) {
         this.restClient = builder
                 .baseUrl("http://localhost:11434")
-                .requestFactory(new org.springframework.http.client.SimpleClientHttpRequestFactory() {{
+                .requestFactory(new SimpleClientHttpRequestFactory() {{
                     setConnectTimeout(30000);
                     setReadTimeout(180000);
                 }})
@@ -34,7 +35,7 @@ public class QwenEmbeddingProvider implements EmbeddingProvider {
     public void init() {
         RestClient pingClient = RestClient.builder()
                 .baseUrl("http://localhost:11434")
-                .requestFactory(new org.springframework.http.client.SimpleClientHttpRequestFactory() {{
+                .requestFactory(new SimpleClientHttpRequestFactory() {{
                     setConnectTimeout(2000);
                     setReadTimeout(2000);
                 }})

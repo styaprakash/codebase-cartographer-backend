@@ -18,6 +18,7 @@ import lombok.NoArgsConstructor;
 import java.time.LocalDateTime;
 
 import com.codebasecartographer.api.enums.RepositoryStatus;
+import com.codebasecartographer.api.enums.EmbeddingModel;
 
 import jakarta.persistence.EnumType;
 import jakarta.persistence.PrePersist;
@@ -64,7 +65,7 @@ public class Repository {
     // Dimension and provider type are derived from the enum (single source of truth).
     @Enumerated(EnumType.STRING)
     @Column(name = "embedding_model", nullable = true)
-    private com.codebasecartographer.api.enums.EmbeddingModel embeddingModel;
+    private EmbeddingModel embeddingModel;
 
     // pending | indexing | indexed | failed | not_indexed
     @Enumerated(EnumType.STRING) // Store this enum in the database as text/string.

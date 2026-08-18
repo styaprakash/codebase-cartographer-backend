@@ -1,5 +1,5 @@
 server:
-  port: 8080
+  port: 8081
   shutdown: graceful
 
 spring:
@@ -34,7 +34,7 @@ spring:
   data:
     redis:
       host: localhost
-      port: 6379
+      port: 6380
       timeout: 2000ms
       client-type: lettuce
 
@@ -78,11 +78,15 @@ resilience4j:
 
 # LLM API Keys — override via environment variables in production
 deepseek:
-  api-key: ${DEEPSEEK_API_KEY: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}
+  api-key: ${DEEPSEEK_API_KEY:}
+
+nvidia:
+  api:
+    key: ${NVIDIA_API_KEY:}
 
 openai:
   api:
-    key: ${OPENAI_API_KEY:your-openai-api-key-here}
+    key: ${OPENAI_API_KEY:}
 
 openrouter:
   api:
@@ -90,4 +94,7 @@ openrouter:
 
 gemini:
   api:
-    key: ${GEMINI_API_KEY:your-gemini-api-key-here}
+    key: ${GEMINI_API_KEY:}
+
+ollama:
+  base-url: ${OLLAMA_BASE_URL:http://localhost:11434}

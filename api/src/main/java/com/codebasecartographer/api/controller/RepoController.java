@@ -1,5 +1,6 @@
 package com.codebasecartographer.api.controller;
 
+import com.codebasecartographer.api.enums.RepositoryStatus;
 import java.util.List;
 
 import lombok.extern.slf4j.Slf4j;
@@ -111,7 +112,7 @@ public class RepoController extends BaseController {
         String userId = getCurrentUserId();
         // Verify repo belongs to user
         repoService.getRepoById(userId, id);
-        repoService.updateStatus(id, com.codebasecartographer.api.enums.RepositoryStatus.NOT_INDEXED);
+        repoService.updateStatus(id, RepositoryStatus.NOT_INDEXED);
         return repoService.getRepoById(userId, id);
     }
 

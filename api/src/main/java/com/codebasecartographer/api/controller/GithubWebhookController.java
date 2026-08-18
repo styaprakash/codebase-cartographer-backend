@@ -1,5 +1,6 @@
 package com.codebasecartographer.api.controller;
 
+import java.security.MessageDigest;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -119,7 +120,7 @@ public class GithubWebhookController {
                 hexString.append(hex);
             }
 
-            return java.security.MessageDigest.isEqual(hexString.toString().getBytes(), actualSignature.getBytes());
+            return MessageDigest.isEqual(hexString.toString().getBytes(), actualSignature.getBytes());
         } catch (Exception e) {
             log.error("Signature verification algorithm failed", e);
             return false;

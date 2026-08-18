@@ -1,5 +1,6 @@
 package com.codebasecartographer.api.worker;
 
+import org.springframework.dao.QueryTimeoutException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -149,7 +150,7 @@ public class IndexingWorker {
                         break;
                     }
                     
-                    if (ex instanceof org.springframework.dao.QueryTimeoutException) {
+                    if (ex instanceof QueryTimeoutException) {
                         // Expected when BRPOPLPUSH blocking duration exceeds Lettuce's default command timeout.
                         // Treat it as an empty queue and just loop again.
                         continue;
