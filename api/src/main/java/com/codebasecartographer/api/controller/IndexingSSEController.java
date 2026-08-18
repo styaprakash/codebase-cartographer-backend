@@ -188,8 +188,9 @@ public class IndexingSSEController {
     public void sendHeartbeat() {
         emitters.forEach((repoId, emitter) -> {
             try {
-                // Sending an empty comment ":" acts as a network heartbeat without triggering any client-side JavaScript events
-                emitter.send(SseEmitter.event().comment("ping"));
+                // Sending a named 'blink' event acts as a network heartbeat. AWS ALB/Nginx will not drop the connection.
+                // The frontend should explicitly listen for 'blink' and safely ignore it.
+                emitter.send(SseEmitter.event().name("blink").data("keep-alive"));
             } catch (IOException e) {
                 // If the heartbeat fails, the connection is dead. Remove it to prevent memory leaks.
                 log.debug("SSE Heartbeat failed for repo {}. Removing dead connection.", repoId);

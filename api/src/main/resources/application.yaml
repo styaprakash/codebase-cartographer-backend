@@ -5,6 +5,8 @@ server:
 spring:
   application:
     name: codebase-cartographer-api
+  config:
+    import: optional:file:.env[.properties]
   lifecycle:
     timeout-per-shutdown-phase: 30s
   flyway:
@@ -13,9 +15,9 @@ spring:
     out-of-order: true
     table: flyway_schema_history
   datasource:
-    url: jdbc:postgresql://localhost:5432/cartographer
-    username: postgres
-    password: yourpassword
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/cartographer}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:yourpassword}
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: 30
@@ -39,12 +41,12 @@ spring:
       client-type: lettuce
 
 allowed:
-  origins: "http://localhost:3000"
+  origins: ${FRONTEND_URL:"http://localhost:3000"}
 
 # JWT Configuration
 jwt:
-  secret: "codebase-cartographer-secret-key-must-be-at-least-256-bits-long-for-hs256"
-  expiration: 86400000  # 24 hours in milliseconds
+  secret: ${JWT_SECRET:"codebase-cartographer-secret-key-must-be-at-least-256-bits-long-for-hs256"}
+  expiration: ${JWT_EXPIRATION:86400000}  # 24 hours in milliseconds
 
 # Resilience4j Configurations for Embedding Providers
 resilience4j:
