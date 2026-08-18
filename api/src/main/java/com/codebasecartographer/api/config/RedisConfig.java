@@ -10,6 +10,7 @@ import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.RedisSerializer;
+import org.springframework.data.redis.connection.stream.ReadOffset;
 
 @Configuration
 public class RedisConfig {
@@ -46,8 +47,22 @@ public class RedisConfig {
             RedisConnectionFactory connectionFactory = event.getApplicationContext().getBean(RedisConnectionFactory.class);
             connectionFactory.getConnection().ping();
             log.info("Redis/DragonflyDB connection established successfully");
+            
+            createStreamGroup(connectionFactory, "indexing-stream", "worker-group");
+            createStreamGroup(connectionFactory, "incremental-indexing-stream", "worker-group");
         } catch (Exception e) {
             log.warn("Redis/DragonflyDB is not reachable: {}. Cache will be unavailable.", e.getMessage());
+        }
+    }
+
+    private void createStreamGroup(RedisConnectionFactory connectionFactory, String streamKey, String groupName) {
+        try {
+            connectionFactory.getConnection().streamCommands().xGroupCreate(
+                    streamKey.getBytes(), groupName, ReadOffset.from("0"), true);
+            log.info("Created Consumer Group {} for Stream {}", groupName, streamKey);
+        } catch (Exception e) {
+            // Exception typically means the group already exists, which is perfectly fine.
+            log.debug("Consumer group {} for stream {} may already exist: {}", groupName, streamKey, e.getMessage());
         }
     }
 }

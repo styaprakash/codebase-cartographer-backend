@@ -33,3 +33,6 @@ build/
 .vscode/
 
 .opencode/
+
+### Environment Variables ###
+.env

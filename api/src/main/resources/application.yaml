@@ -1,5 +1,5 @@
 server:
-  port: 8081
+  port: 8080
   shutdown: graceful
 
 spring:
@@ -36,7 +36,7 @@ spring:
   data:
     redis:
       host: localhost
-      port: 6380
+      port: 6379
       timeout: 2000ms
       client-type: lettuce
 
