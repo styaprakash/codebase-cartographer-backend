@@ -36,3 +36,5 @@ build/
 
 ### Environment Variables ###
 .env
+
+*.log
