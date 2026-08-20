@@ -82,6 +82,9 @@ public class IndexingWorker implements StreamListener<String, MapRecord<String, 
             dragonflyQueueService.complete(message.getId());
             return;
         }
+        if (repoId.startsWith("\"") && repoId.endsWith("\"")) {
+            repoId = repoId.substring(1, repoId.length() - 1);
+        }
         
         try {
             log.info("Repo {} -> INDEXING (Stream Record ID: {})", repoId, message.getId());

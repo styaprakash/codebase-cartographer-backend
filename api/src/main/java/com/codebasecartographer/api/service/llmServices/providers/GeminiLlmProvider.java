@@ -25,6 +25,10 @@ public class GeminiLlmProvider implements GenerativeLlmProvider {
         this.apiKey = apiKey;
         this.restClient = builder
                 .baseUrl("https://generativelanguage.googleapis.com/v1beta/models")
+                .requestFactory(new org.springframework.http.client.SimpleClientHttpRequestFactory() {{
+                    setConnectTimeout(15000);
+                    setReadTimeout(60000);
+                }})
                 .defaultHeader("x-goog-api-key", apiKey)
                 .build();
     }

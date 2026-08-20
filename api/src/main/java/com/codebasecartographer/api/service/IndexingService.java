@@ -72,8 +72,6 @@ public class IndexingService {
     // Shared executor for parallel file processing
     private final ExecutorService fileProcessingExecutor = Executors.newFixedThreadPool(20);
 
-    private static final int EMBEDDING_BATCH_SIZE = 5; // Safe batch size for local Ollama hardware
-
     public IndexingService(RepositoryRepository repositoryRepository,
             CodeChunkRepository codeChunkRepository,
             RepoService repoService,
@@ -163,10 +161,14 @@ public class IndexingService {
         Repository repository = repositoryRepository.findById(repoId)
                 .orElseThrow(() -> new ResourceNotFoundException("Repository", "id", repoId));
 
-        EmbeddingModel selected = modelSelector.selectModel();
-        repository.setEmbeddingModel(selected);
-        repositoryRepository.save(repository);
-        log.info("Assigned embedding model {} to repo {}", selected, repoId);
+        if (repository.getEmbeddingModel() == null) {
+            EmbeddingModel selected = modelSelector.selectModel();
+            repository.setEmbeddingModel(selected);
+            repositoryRepository.save(repository);
+            log.info("Assigned default embedding model {} to repo {}", selected, repoId);
+        } else {
+            log.info("Using user-selected embedding model {} for repo {}", repository.getEmbeddingModel(), repoId);
+        }
 
         // ALWAYS clear old chunks in the Vector DB to prevent duplicates and orphaned data
         codeChunkRepository.deleteChunksByRepoId(repoId);
@@ -294,6 +296,7 @@ public class IndexingService {
 
             AtomicInteger started = new AtomicInteger(0);
             AtomicInteger processed = new AtomicInteger(0);
+            int batchSize = providerFactory.getProvider(repository.getEmbeddingModel()).getOptimalBatchSize();
 
             for (GitHubFileService.GithubFile file : filesToProcess) {
                 final String filePath = file.path();
@@ -310,9 +313,9 @@ public class IndexingService {
                             List<List<CodeChunk>> batchesToProcess = new ArrayList<>();
                             synchronized (sharedBuffer) {
                                 sharedBuffer.addAll(fileChunks);
-                                while (sharedBuffer.size() >= EMBEDDING_BATCH_SIZE) {
-                                    List<CodeChunk> batch = new ArrayList<>(sharedBuffer.subList(0, EMBEDDING_BATCH_SIZE));
-                                    sharedBuffer.subList(0, EMBEDDING_BATCH_SIZE).clear();
+                                while (sharedBuffer.size() >= batchSize) {
+                                    List<CodeChunk> batch = new ArrayList<>(sharedBuffer.subList(0, batchSize));
+                                    sharedBuffer.subList(0, batchSize).clear();
                                     batchesToProcess.add(batch);
                                 }
                             }
@@ -328,6 +331,7 @@ public class IndexingService {
                         // Throwable ensures the thread doesn't die silently, which would
                         // cause the SSE stream to hang indefinitely.
                         log.error("SEVERE: Failed processing file {} (possible JVM Error)", filePath, t);
+                        throw new RuntimeException("Failed processing file " + filePath, t);
                     } finally {
                         int completedCount = processed.incrementAndGet();
                         repoService.updateProgress(repoId, completedCount, totalFiles);
@@ -420,6 +424,7 @@ public class IndexingService {
         AtomicInteger processed = new AtomicInteger(0);
         List<CodeChunk> sharedBuffer = Collections.synchronizedList(new ArrayList<>());
         List<CompletableFuture<Void>> futures = new ArrayList<>();
+        int batchSize = providerFactory.getProvider(repository.getEmbeddingModel()).getOptimalBatchSize();
 
         for (String filePath : filesToFetch) {
             futures.add(CompletableFuture.runAsync(() -> {
@@ -441,9 +446,9 @@ public class IndexingService {
                         List<List<CodeChunk>> batchesToProcess = new ArrayList<>();
                         synchronized (sharedBuffer) {
                             sharedBuffer.addAll(fileChunks);
-                            while (sharedBuffer.size() >= EMBEDDING_BATCH_SIZE) {
-                                List<CodeChunk> batch = new ArrayList<>(sharedBuffer.subList(0, EMBEDDING_BATCH_SIZE));
-                                sharedBuffer.subList(0, EMBEDDING_BATCH_SIZE).clear();
+                            while (sharedBuffer.size() >= batchSize) {
+                                List<CodeChunk> batch = new ArrayList<>(sharedBuffer.subList(0, batchSize));
+                                sharedBuffer.subList(0, batchSize).clear();
                                 batchesToProcess.add(batch);
                             }
                         }
@@ -517,8 +522,10 @@ public class IndexingService {
     // save VECTOR(1536) to embedding column
     protected void generateAndSaveEmbeddingsForBatch(Repository repo, List<CodeChunk> chunks) {
         EmbeddingProvider provider = providerFactory.getProvider(repo.getEmbeddingModel());
+        int optimalBatchSize = provider.getOptimalBatchSize();
         log.info("Using embedding model: {}", provider.getModel().getModelTag());
         log.info("Embedding dimension: {}", provider.getModel().getDimension());
+        log.info("Optimal batch size: {}", optimalBatchSize);
 
         // Filter out empty chunks first
         List<CodeChunk> nonEmptyChunks = chunks.stream()
@@ -538,7 +545,7 @@ public class IndexingService {
             batchChunks.add(chunk);
 
             // When batch reaches size, embed the whole batch
-            if (batchTexts.size() >= EMBEDDING_BATCH_SIZE) {
+            if (batchTexts.size() >= optimalBatchSize) {
                 embedBatchAndSave(repo, provider, batchTexts, batchChunks);
                 batchTexts.clear();
                 batchChunks.clear();
@@ -637,7 +644,7 @@ public class IndexingService {
                 chunk.setEmbedding(embedding);
                 savedChunks.add(chunk);
 
-                if (savedChunks.size() >= EMBEDDING_BATCH_SIZE) {
+                if (savedChunks.size() >= provider.getOptimalBatchSize()) {
                     chunkSaveService.saveChunks(savedChunks);
                     savedChunks.clear();
                 }
@@ -646,6 +653,14 @@ public class IndexingService {
                 failedCount++;
                 log.error("Chunk save failed for file={}, name={}: ",
                         chunk.getFilePath(), chunk.getChunkName(), e);
+
+                Throwable rootCause = e;
+                while (rootCause.getCause() != null) rootCause = rootCause.getCause();
+                if (rootCause instanceof org.springframework.web.client.HttpClientErrorException.TooManyRequests
+                        || rootCause instanceof org.springframework.web.client.HttpClientErrorException.BadRequest
+                        || rootCause instanceof org.springframework.web.client.HttpClientErrorException.NotFound) {
+                    throw new RuntimeException("Unrecoverable API error during fallback: " + rootCause.getMessage(), e);
+                }
             }
         }
 
@@ -717,15 +732,28 @@ public class IndexingService {
     @EventListener(ApplicationReadyEvent.class)
     public void cleanupOrphanedJobs() {
         log.info("Running startup sweep to clean up orphaned indexing jobs...");
-        List<Repository> orphaned = repositoryRepository.findByStatus(RepositoryStatus.INDEXING);
-        for (Repository repo : orphaned) {
-            log.warn("Found orphaned job for repo {}. Marking as FAILED.", repo.getId());
+        
+        // Find jobs that were actively processing when the server crashed
+        List<Repository> orphanedIndexing = repositoryRepository.findByStatus(RepositoryStatus.INDEXING);
+        
+        // Find jobs that were queued but the worker never picked them up before the crash
+        List<Repository> orphanedPending = repositoryRepository.findByStatus(RepositoryStatus.PENDING);
+        
+        // Combine both lists so we can safely reset all stuck jobs
+        List<Repository> allOrphaned = new ArrayList<>();
+        allOrphaned.addAll(orphanedIndexing);
+        allOrphaned.addAll(orphanedPending);
+
+        for (Repository repo : allOrphaned) {
+            log.warn("Found orphaned job (Stuck on {}) for repo {}. Marking as FAILED.", repo.getStatus(), repo.getId());
             repoService.updateStatus(repo.getId(), RepositoryStatus.FAILED);
             repoService.setErrorMessage(repo.getId(), "Indexing interrupted: Server was shut down unexpectedly.");
+            
+            // Delete any partial code chunks from the DB to prevent duplicates on the next run
             codeChunkRepository.deleteChunksByRepoId(repo.getId());
             log.info("Deleted orphaned chunks for repo {} in Vector DB", repo.getId());
         }
-        log.info("Startup sweep complete. Cleaned up {} orphaned jobs.", orphaned.size());
+        log.info("Startup sweep complete. Cleaned up {} orphaned jobs.", allOrphaned.size());
     }
 
     @PreDestroy

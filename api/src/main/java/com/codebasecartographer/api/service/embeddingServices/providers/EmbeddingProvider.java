@@ -16,6 +16,9 @@ public interface EmbeddingProvider {
     // Whether this provider is available (API key present, service reachable, etc.)
     default boolean isEnabled() { return true; }
 
+    // Optimal batch size for this specific provider (e.g., 5 for local Ollama, 100 for Gemini)
+    default int getOptimalBatchSize() { return 5; }
+
     // Single text → vector
     float[] embed(String text);
 

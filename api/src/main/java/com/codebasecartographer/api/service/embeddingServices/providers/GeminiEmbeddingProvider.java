@@ -1,6 +1,8 @@
 package com.codebasecartographer.api.service.embeddingServices.providers;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -24,6 +26,10 @@ public class GeminiEmbeddingProvider implements EmbeddingProvider {
         this.apiKey = apiKey;
         this.restClient = builder
                 .baseUrl("https://generativelanguage.googleapis.com/v1beta/models")
+                .requestFactory(new org.springframework.http.client.SimpleClientHttpRequestFactory() {{
+                    setConnectTimeout(15000);
+                    setReadTimeout(60000);
+                }})
                 .defaultHeader("x-goog-api-key", apiKey)
                 .build();
     }
@@ -50,6 +56,11 @@ public class GeminiEmbeddingProvider implements EmbeddingProvider {
     }
 
     @Override
+    public int getOptimalBatchSize() {
+        return 100; // Google's batchEmbedContents allows up to 100
+    }
+
+    @Override
     @RateLimiter(name = "premium-api")
     @Retry(name = "premium-api")
     public float[] embed(String text) {
@@ -57,15 +68,16 @@ public class GeminiEmbeddingProvider implements EmbeddingProvider {
             throw new IllegalStateException("Gemini provider is disabled: no API key");
         }
 
-        log.debug("Generating embedding using Gemini (text-embedding-004)");
+        log.debug("Generating embedding using Gemini");
 
         GeminiEmbeddingRequest request = new GeminiEmbeddingRequest(
-                "models/text-embedding-004",
-                new Content(List.of(new Part(text)))
+                "models/gemini-embedding-2",
+                new Content(List.of(new Part(text))),
+                getModel().getDimension()
         );
 
         GeminiEmbeddingResponse response = restClient.post()
-                .uri("/text-embedding-004:embedContent")
+                .uri("/gemini-embedding-2:embedContent")
                 .body(request)
                 .retrieve()
                 .body(GeminiEmbeddingResponse.class);
@@ -74,25 +86,64 @@ public class GeminiEmbeddingProvider implements EmbeddingProvider {
             throw new RuntimeException("Received invalid response from Gemini Embedding API");
         }
 
-        List<Float> values = response.embedding().values();
+        return toFloatArray(response.embedding().values());
+    }
+
+    @Override
+    @RateLimiter(name = "premium-api")
+    @Retry(name = "premium-api")
+    public List<float[]> embedBatch(List<String> texts) {
+        if (!enabled) {
+            throw new IllegalStateException("Gemini provider is disabled: no API key");
+        }
+
+        log.debug("Generating batch embeddings using Gemini for {} chunks", texts.size());
+
+        List<GeminiEmbeddingRequest> requests = texts.stream()
+                .map(text -> new GeminiEmbeddingRequest(
+                        "models/gemini-embedding-2",
+                        new Content(List.of(new Part(text))),
+                        getModel().getDimension()
+                ))
+                .collect(Collectors.toList());
+
+        GeminiBatchEmbeddingRequest batchRequest = new GeminiBatchEmbeddingRequest(requests);
+
+        GeminiBatchEmbeddingResponse response = restClient.post()
+                .uri("/gemini-embedding-2:batchEmbedContents")
+                .body(batchRequest)
+                .retrieve()
+                .body(GeminiBatchEmbeddingResponse.class);
+
+        if (response == null || response.embeddings() == null) {
+            throw new RuntimeException("Received invalid batch response from Gemini Embedding API");
+        }
+
+        return response.embeddings().stream()
+                .map(e -> toFloatArray(e.values()))
+                .collect(Collectors.toList());
+    }
+
+    private float[] toFloatArray(List<Float> values) {
         float[] result = new float[values.size()];
         for (int i = 0; i < values.size(); i++) {
             result[i] = values.get(i);
         }
 
         if (result.length != getModel().getDimension()) {
-            log.error("DIMENSION MISMATCH: Gemini returned {} dimensions, but the database requires exactly 1536.",
-                    result.length);
+            log.error("DIMENSION MISMATCH: Gemini returned {} dimensions, but the database requires exactly {}.",
+                    result.length, getModel().getDimension());
             throw new IllegalStateException("DIMENSION MISMATCH: Gemini returned " + result.length
-                    + " dimensions, but the database requires exactly 1536.");
+                    + " dimensions, but the database requires exactly " + getModel().getDimension() + ".");
         }
-
         return result;
     }
 
     private record Part(String text) {}
     private record Content(List<Part> parts) {}
-    private record GeminiEmbeddingRequest(String model, Content content) {}
+    private record GeminiEmbeddingRequest(String model, Content content, Integer outputDimensionality) {}
     private record EmbeddingValues(List<Float> values) {}
     private record GeminiEmbeddingResponse(EmbeddingValues embedding) {}
+    private record GeminiBatchEmbeddingRequest(List<GeminiEmbeddingRequest> requests) {}
+    private record GeminiBatchEmbeddingResponse(List<EmbeddingValues> embeddings) {}
 }

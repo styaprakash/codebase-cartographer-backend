@@ -131,6 +131,7 @@ public class RepoService {
         //If indexing complete -> record the timestamp
         if(status == RepositoryStatus.INDEXED){
             repo.setIndexedAt(LocalDateTime.now());
+            repo.setErrorMessage(null);
         }
 
         repositoryRepository.save(repo);
@@ -157,7 +158,6 @@ public class RepoService {
         repo.setTotalFiles(0);
         repo.setErrorMessage(null);
         repo.setStatus(RepositoryStatus.PENDING);
-        repo.setEmbeddingModel(null);
         repositoryRepository.save(repo);
     }
 

@@ -90,8 +90,8 @@ public class RepoController extends BaseController {
         // Permanent fix: Map legacy frontend payloads to prevent 400 Bad Request 
         // without polluting the core EmbeddingModel enum
         if ("OPENROUTER_QWEN_EMBEDDING".equals(embeddingModel)) {
-            log.info("Intercepted legacy embedding model request, upgrading to OPENROUTER_EMBEDDING_1536");
-            embeddingModel = "OPENROUTER_EMBEDDING_1536";
+            log.info("Intercepted legacy embedding model request, upgrading to OPENROUTER_QWEN_EMBEDDING_1536");
+            embeddingModel = "OPENROUTER_QWEN_EMBEDDING_1536";
         }
 
         return indexingService.triggerIndexing(id, name, fullName, branch, language, embeddingModel);

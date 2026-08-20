@@ -73,6 +73,14 @@ public class IncrementalIndexingWorker implements StreamListener<String, MapReco
             dragonflyQueueService.completeIncremental(message.getId());
             return;
         }
+        if (payloadJson.startsWith("\"") && payloadJson.endsWith("\"")) {
+            // Jackson serializes strings with quotes and escapes internal quotes. We must unescape.
+            try {
+                payloadJson = objectMapper.readValue(payloadJson, String.class);
+            } catch (Exception e) {
+                payloadJson = payloadJson.substring(1, payloadJson.length() - 1);
+            }
+        }
 
         try {
             log.info("Processing Incremental Job (Stream Record ID: {})", message.getId());

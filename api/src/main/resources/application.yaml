@@ -36,7 +36,7 @@ spring:
   data:
     redis:
       host: localhost
-      port: 6379
+      port: 6380
       timeout: 2000ms
       client-type: lettuce
 
@@ -54,9 +54,9 @@ resilience4j:
     instances:
       # Premium API limit: Max 50 requests every 1 second
       premium-api:
-        limitForPeriod: 50
-        limitRefreshPeriod: 1s
-        timeoutDuration: 5s # Wait up to 5s to acquire a permit before failing
+        limitForPeriod: ${API_RATE_LIMIT:15}
+        limitRefreshPeriod: ${API_RATE_REFRESH:60s}
+        timeoutDuration: 5m # Wait up to 5m to acquire a permit
   bulkhead:
     instances:
       # Local Ollama limit: Restrict to 4 concurrent GPU executions

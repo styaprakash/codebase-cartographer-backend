@@ -31,6 +31,10 @@ public class OpenRouterLlmProvider implements GenerativeLlmProvider {
         this.apiKey = apiKey;
         this.restClient = builder
                 .baseUrl("https://openrouter.ai/api/v1")
+                .requestFactory(new org.springframework.http.client.SimpleClientHttpRequestFactory() {{
+                    setConnectTimeout(15000);
+                    setReadTimeout(60000);
+                }})
                 .defaultHeader("Authorization", "Bearer " + apiKey)
                 .defaultHeader("Content-Type", "application/json")
                 .build();

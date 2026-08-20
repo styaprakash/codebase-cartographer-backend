@@ -24,6 +24,10 @@ public class OpenRouterEmbeddingProvider implements EmbeddingProvider {
         this.apiKey = apiKey;
         this.restClient = builder
                 .baseUrl("https://openrouter.ai/api/v1")
+                .requestFactory(new org.springframework.http.client.SimpleClientHttpRequestFactory() {{
+                    setConnectTimeout(15000);
+                    setReadTimeout(60000);
+                }})
                 .defaultHeader("Authorization", "Bearer " + apiKey)
                 .defaultHeader("HTTP-Referer", "http://localhost:3000")
                 .build();
@@ -42,7 +46,7 @@ public class OpenRouterEmbeddingProvider implements EmbeddingProvider {
 
     @Override
     public EmbeddingModel getModel() {
-        return EmbeddingModel.OPENROUTER_EMBEDDING_1536;
+        return EmbeddingModel.OPENROUTER_QWEN_EMBEDDING_1536;
     }
 
     @Override
