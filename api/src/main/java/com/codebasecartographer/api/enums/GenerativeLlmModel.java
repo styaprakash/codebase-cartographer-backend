@@ -14,10 +14,8 @@ public enum GenerativeLlmModel {
     OLLAMA_GEMMA_4_E4B("gemma4:e4b", "ollama", true),
 
     // ── Google AI Studio (Bleeding Edge) ──────────────────────────
-    GEMINI_1_5_FLASH("gemini-1.5-flash", "gemini", true),
     GEMINI_3_5_FLASH("gemini-3.5-flash", "gemini", true),
     GEMINI_2_5_FLASH("gemini-2.5-flash", "gemini", true),
-    GEMINI_2_0_FLASH("gemini-2.0-flash", "gemini", true),
     GEMINI_2_5_FLASH_LITE("gemini-2.5-flash-lite", "gemini", true),
     GEMINI_3_1_FLASH_LITE_PREVIEW("gemini-3.1-flash-lite-preview", "gemini", true),
 

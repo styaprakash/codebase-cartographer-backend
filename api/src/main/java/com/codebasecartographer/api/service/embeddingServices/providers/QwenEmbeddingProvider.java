@@ -90,17 +90,41 @@ public class QwenEmbeddingProvider implements EmbeddingProvider {
             throw new RuntimeException("Ollama returned null or empty embeddings for model " + model.getModelTag());
         }
 
-        // Validate dimension of first embedding — all should be identical
-        float[] first = response.embeddings().get(0);
-        if (first.length != model.getDimension()) {
-            log.error("DIMENSION MISMATCH: Ollama returned {} dimensions for model '{}', but the database requires exactly 1536.",
-                    first.length, model.getModelTag());
+        // Qwen3 is a Matryoshka model (supports representation slicing). 
+        // Ollama natively returns 4096 dimensions, but our Postgres DB requires exactly 1536.
+        // We will slice the first 1536 dimensions and L2-normalize them.
+        List<float[]> embeddings = response.embeddings();
+        int requiredDim = model.getDimension();
+        
+        float[] first = embeddings.get(0);
+        if (first.length > requiredDim) {
+            for (int i = 0; i < embeddings.size(); i++) {
+                float[] original = embeddings.get(i);
+                float[] truncated = new float[requiredDim];
+                System.arraycopy(original, 0, truncated, 0, requiredDim);
+                
+                // L2 Normalize
+                float sumSq = 0;
+                for (float v : truncated) {
+                    sumSq += v * v;
+                }
+                float norm = (float) Math.sqrt(sumSq);
+                if (norm > 0) {
+                    for (int j = 0; j < requiredDim; j++) {
+                        truncated[j] /= norm;
+                    }
+                }
+                embeddings.set(i, truncated);
+            }
+        } else if (first.length < requiredDim) {
+            log.error("DIMENSION MISMATCH: Ollama returned {} dimensions for model '{}', but the database requires exactly {}.",
+                    first.length, model.getModelTag(), requiredDim);
             throw new IllegalStateException("DIMENSION MISMATCH: Ollama returned " + first.length
                     + " dimensions for model '" + model.getModelTag()
-                    + "', but the database requires exactly 1536.");
+                    + "', but the database requires exactly " + requiredDim + ".");
         }
 
-        return response.embeddings();
+        return embeddings;
     }
 
 }

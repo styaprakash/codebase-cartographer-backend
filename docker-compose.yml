@@ -2,9 +2,9 @@ services:
   postgres:
     image: pgvector/pgvector:pg17
     environment:
-      POSTGRES_DB: cartographer
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: yourpassword
+      POSTGRES_DB: ${DB_NAME:-cartographer}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-yourpassword}
     ports:
       - "5432:5432"
     volumes:
@@ -24,6 +24,51 @@ services:
     ulimits:
       memlock: -1
 
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - DB_URL=jdbc:postgresql://postgres:5432/${DB_NAME:-cartographer}
+      - DB_USERNAME=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-yourpassword}
+      - SPRING_DATA_REDIS_HOST=dragonfly
+      - SPRING_DATA_REDIS_PORT=6379
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - API_RATE_LIMIT=${API_RATE_LIMIT:-15}
+      - API_RATE_REFRESH=${API_RATE_REFRESH:-60s}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      dragonfly:
+        condition: service_started
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    depends_on:
+      - api
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3001:3000" # Mapped to 3001 to avoid conflicting with typical React frontends
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - prometheus
+    volumes:
+      - grafanadata:/var/lib/grafana
+
 volumes:
   pgdata:
   dragonflydata:
+  grafanadata:

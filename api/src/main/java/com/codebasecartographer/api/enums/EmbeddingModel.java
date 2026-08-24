@@ -7,7 +7,7 @@ package com.codebasecartographer.api.enums;
  */
 public enum EmbeddingModel {
     // Currently active — the only model pulled in Ollama
-    QWEN3_EMBEDDING("qwen3-embedding:8b", 1536, "ollama", true),
+    QWEN3_EMBEDDING("qwen3-embedding:latest", 1536, "ollama", true),
 
     // Placeholders — enable when model is pulled and provider is implemented
     EMBEDDING_GEMMA("embedding-gemma:300m", 768, "ollama", false),

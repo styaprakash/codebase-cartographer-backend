@@ -1,6 +1,7 @@
 package com.codebasecartographer.api.service;
 
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
@@ -21,6 +22,10 @@ import lombok.extern.slf4j.Slf4j;
 public class LlmGenerationService {
     private final CodeSearchService codeSearchService;
     private final LlmProviderFactory llmProviderFactory;
+
+    public Set<GenerativeLlmModel> getAvailableModels() {
+        return llmProviderFactory.getAvailableModels();
+    }
 
     public ChatResponse generateChatResponse(String repoId, ChatRequest request) {
         log.info("Generating chat response for repo: {}", repoId);

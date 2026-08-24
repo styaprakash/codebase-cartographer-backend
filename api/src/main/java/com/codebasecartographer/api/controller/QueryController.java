@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.codebasecartographer.api.dto.request.QueryRequest;
 import com.codebasecartographer.api.dto.response.QueryResponse;
+import com.codebasecartographer.api.dto.response.ChatMessage;
 import com.codebasecartographer.api.service.QueryService;
 
 import jakarta.validation.Valid;
@@ -42,7 +43,7 @@ public class QueryController extends BaseController {
     // GET /api/repos/{id}/queries
     // Triggers: Repo Explorer page loads, restores previous chat history
     @GetMapping("/repos/{id}/queries")
-    public List<QueryResponse> getMethodName(
+    public List<ChatMessage> getMethodName(
         @PathVariable("id") String repoId
     ) {
         String userId = getCurrentUserId();

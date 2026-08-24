@@ -62,8 +62,8 @@ resilience4j:
       # Local Ollama limit: Restrict to 4 concurrent GPU executions
       local-ollama:
         maxConcurrentCalls: 4
-        # Wait patiently in queue for up to 60s if all 4 slots are occupied
-        maxWaitDuration: 60s
+        # Wait patiently in queue for up to 5m if all 4 slots are occupied (allows time for Ollama to load model into VRAM)
+        maxWaitDuration: 5m
   retry:
     instances:
       # Premium API Retry: Exponential backoff for rate limits and server errors
@@ -100,3 +100,12 @@ gemini:
 
 ollama:
   base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+# Observability Configuration
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  metrics:
+    tags:
+      application: ${spring.application.name}

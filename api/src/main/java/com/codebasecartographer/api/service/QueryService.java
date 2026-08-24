@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.codebasecartographer.api.dto.response.QueryResponse;
+import com.codebasecartographer.api.dto.response.ChatMessage;
 import com.codebasecartographer.api.entity.QueryLog;
 import com.codebasecartographer.api.entity.Repository;
 import com.codebasecartographer.api.entity.User;
@@ -110,15 +111,14 @@ public class QueryService {
 
     // ── Get Query History ─────────────────────────────────────────
     // Called by GET /api/repos/:id/queries
-    // Returns all previous Q&A for this repo
-    // Used to restore chat history when user reopens Repo Explorer
-    public List<QueryResponse> getQueryHistory(String userId, String repoId) {
+    // Returns all previous Q&A for this repo in chat format
+    public List<ChatMessage> getQueryHistory(String userId, String repoId) {
         // Verify access first
         verifyRepoAccess(userId, repoId);
 
         return queryLogRepository.findByRepository_Id(repoId)
                 .stream()
-                .map(this::toResponse)
+                .flatMap(log -> toChatMessages(log).stream())
                 .collect(Collectors.toList()); 
     }
 
@@ -131,7 +131,7 @@ public class QueryService {
     //private method to save query log
     // Saves question + answer to query_logs table
     // Called after every successful query
-    private void saveQueryLog(String userId, String repoId, String question, String answer, int tokensUsed) {
+    public void saveQueryLog(String userId, String repoId, String question, String answer, int tokensUsed) {
         //check if the user exists
         User user = userRepository.findById(userId)
             .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
@@ -151,14 +151,25 @@ public class QueryService {
         queryLogRepository.save(log);
     }
 
-    // ── Private: toResponse ───────────────────────────────────────
-    // Converts QueryLog entity → QueryResponse DTO
-    private QueryResponse toResponse(QueryLog log){
-        return QueryResponse.builder()
-                .answer(log.getAnswer())
-                .tokensUsed(log.getTokensUsed())
-                .sourceFiles(Collections.emptyList())
-                // Week 5: parse sourceChunks JSON → List<String>
-                .build();
+    // ── Private: toChatMessages ───────────────────────────────────────
+    // Converts QueryLog entity → List of ChatMessage (User + Assistant)
+    private List<ChatMessage> toChatMessages(QueryLog log){
+        String time = log.getCreatedAt().toString();
+        return List.of(
+            new ChatMessage(
+                log.getId() + "-user",
+                "user",
+                log.getQuestion(),
+                null,
+                time
+            ),
+            new ChatMessage(
+                log.getId() + "-ai",
+                "assistant",
+                log.getAnswer(),
+                Collections.emptyList(), // Week 5: parse sourceChunks JSON → List<String>
+                time
+            )
+        );
     }
 }
