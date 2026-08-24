@@ -1,24 +1,6 @@
 services:
-  postgres:
-    image: pgvector/pgvector:pg17
-    environment:
-      POSTGRES_DB: ${DB_NAME:-cartographer}
-      POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-yourpassword}
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
   dragonfly:
     image: docker.dragonflydb.io/dragonflydb/dragonfly
-    ports:
-      - "6379:6379"
     volumes:
       - dragonflydata:/data
     ulimits:
@@ -31,9 +13,9 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - DB_URL=jdbc:postgresql://postgres:5432/${DB_NAME:-cartographer}
-      - DB_USERNAME=${DB_USER:-postgres}
-      - DB_PASSWORD=${DB_PASSWORD:-yourpassword}
+      - DB_URL=${DB_URL}
+      - DB_USERNAME=${DB_USERNAME}
+      - DB_PASSWORD=${DB_PASSWORD}
       - SPRING_DATA_REDIS_HOST=dragonfly
       - SPRING_DATA_REDIS_PORT=6379
       - GEMINI_API_KEY=${GEMINI_API_KEY}
@@ -43,8 +25,6 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
-      postgres:
-        condition: service_healthy
       dragonfly:
         condition: service_started
 

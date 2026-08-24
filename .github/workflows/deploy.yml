@@ -1,0 +1,47 @@
+name: Build and Push to GCP
+
+on:
+  push:
+    branches:
+      - main
+
+# Required for Workload Identity Federation OIDC tokens
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  PROJECT_ID: project-2fb168c7-413a-4010-acf
+  REGION: us-east1
+  REPO_NAME: cartographer-repo
+  IMAGE_NAME: backend-api
+  WORKLOAD_IDENTITY_PROVIDER: projects/670905467651/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+  SERVICE_ACCOUNT: github-actions-deployer@project-2fb168c7-413a-4010-acf.iam.gserviceaccount.com
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          token_format: access_token
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Authenticate Docker to Artifact Registry
+        run: |
+          gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
+
+      - name: Build and Push Docker Image
+        run: |
+          IMAGE_PATH="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.IMAGE_NAME }}"
+          docker build -t $IMAGE_PATH:latest ./api
+          docker push $IMAGE_PATH:latest
