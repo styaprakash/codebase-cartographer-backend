@@ -1,0 +1,52 @@
+services:
+  dragonfly:
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
+    volumes:
+      - dragonflydata:/data
+    ulimits:
+      memlock: -1
+
+  api:
+    image: us-east1-docker.pkg.dev/project-2fb168c7-413a-4010-acf/cartographer-repo/backend-api:latest
+    ports:
+      - "80:8080"
+    environment:
+      - DB_URL=${DB_URL}
+      - DB_USERNAME=${DB_USERNAME}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - SPRING_DATA_REDIS_HOST=dragonfly
+      - SPRING_DATA_REDIS_PORT=6379
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - API_RATE_LIMIT=${API_RATE_LIMIT:-15}
+      - API_RATE_REFRESH=${API_RATE_REFRESH:-60s}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      dragonfly:
+        condition: service_started
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    depends_on:
+      - api
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - prometheus
+    volumes:
+      - grafanadata:/var/lib/grafana
+
+volumes:
+  pgdata:
+  dragonflydata:
+  grafanadata:
