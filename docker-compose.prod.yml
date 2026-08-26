@@ -19,8 +19,8 @@ services:
       - API_RATE_LIMIT=${API_RATE_LIMIT:-15}
       - API_RATE_REFRESH=${API_RATE_REFRESH:-60s}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      - FRONTEND_URL=https://codebase-cartographer-bgg7.vercel.app
-      - FRONTEND_CORS=https://codebase-cartographer-bgg7.vercel.app
+      - FRONTEND_URL=https://codebase-cartographer-live.vercel.app
+      - FRONTEND_CORS=https://codebase-cartographer-live.vercel.app
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
