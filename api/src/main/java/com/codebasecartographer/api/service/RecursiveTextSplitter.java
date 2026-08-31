@@ -58,15 +58,23 @@ public class RecursiveTextSplitter {
         }
 
         // Delegate to the recursive splitting algorithm starting with the broadest separator
-        List<String> textChunks = splitText(code, 0);
+        List<String> rawChunks = splitText(code, 0);
+        
+        // Apply overlap once globally on the contiguous chunks
+        List<String> textChunks = applyOverlap(rawChunks);
 
         // Convert raw text chunks into ASTChunk DTOs with line number metadata
         List<ASTChunk> result = new ArrayList<>();
         int charOffset = 0;
 
-        for (String chunk : textChunks) {
-            // Calculate approximate line numbers based on character offset
-            int startLine = countLines(code, 0, charOffset) + 1;
+        for (int i = 0; i < rawChunks.size(); i++) {
+            String rawChunk = rawChunks.get(i);
+            String chunk = textChunks.get(i);
+            
+            // Calculate approximate line numbers based on exact character offset
+            // The chunk actually starts at charOffset - OVERLAP (if i > 0)
+            int actualStartOffset = (i == 0) ? 0 : Math.max(0, charOffset - CHUNK_OVERLAP);
+            int startLine = countLines(code, 0, actualStartOffset) + 1;
             int endLine = startLine + countNewlines(chunk);
 
             result.add(ASTChunk.builder()
@@ -78,9 +86,8 @@ public class RecursiveTextSplitter {
                     .chunkType("MODULE")  // Pure text splitting can't determine function/class types
                     .build());
 
-            // Advance offset by chunk size minus overlap to account for the sliding window
-            charOffset += chunk.length() - CHUNK_OVERLAP;
-            if (charOffset < 0) charOffset = 0;
+            // Advance offset by the exact length of the non-overlapping segment
+            charOffset += rawChunk.length();
         }
 
         log.debug("Split code into {} chunks (avg {} chars each)", result.size(),
@@ -146,8 +153,8 @@ public class RecursiveTextSplitter {
             chunks.add(currentChunk.toString());
         }
 
-        // Apply overlap between consecutive chunks
-        return applyOverlap(chunks);
+        // Return contiguous, non-overlapping chunks. Overlap is applied once at the top level.
+        return chunks;
     }
 
     /**
@@ -160,7 +167,7 @@ public class RecursiveTextSplitter {
         while (start < text.length()) {
             int end = Math.min(start + CHUNK_SIZE, text.length());
             chunks.add(text.substring(start, end));
-            start += CHUNK_SIZE - CHUNK_OVERLAP;
+            start += CHUNK_SIZE; // Do not apply overlap here, done at top level
         }
         return chunks;
     }
