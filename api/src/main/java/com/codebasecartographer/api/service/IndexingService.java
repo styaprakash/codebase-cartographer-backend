@@ -484,11 +484,21 @@ public class IndexingService {
     }
 
     private boolean isSupportedFile(String path) {
+        String lowerPath = path.toLowerCase();
+        
+        // Blocklist for noise files
+        String fileName = com.codebasecartographer.api.utils.FileUtils.extractFileName(lowerPath);
+        Set<String> IGNORED_FILES = Set.of("changelog.md", "license", "license.md", "package-lock.json", "yarn.lock");
+        if (IGNORED_FILES.contains(fileName)) {
+            return false;
+        }
+
         Set<String> SUPPORTED_EXTENSIONS = Set.of(
             ".java", ".ts", ".tsx", ".js", ".jsx",
-            ".py", ".go", ".rs", ".cpp", ".c"
+            ".py", ".go", ".rs", ".cpp", ".c",
+            ".md", ".mdx"
         );
-        return SUPPORTED_EXTENSIONS.stream().anyMatch(path::endsWith);
+        return SUPPORTED_EXTENSIONS.stream().anyMatch(lowerPath::endsWith);
     }
 
     private List<CodeChunk> buildChunks(Repository repo, GithubFile file) {
@@ -497,15 +507,23 @@ public class IndexingService {
         // Language detection is kept for potential future use but not required for splitting
         List<ASTChunk> astChunks = recursiveTextSplitter.chunkCode(file.content());
 
+        boolean isDoc = file.path().toLowerCase().endsWith(".md") || file.path().toLowerCase().endsWith(".mdx");
+        com.codebasecartographer.api.enums.ChunkType fallbackChunkType = isDoc ? com.codebasecartographer.api.enums.ChunkType.DOC : com.codebasecartographer.api.enums.ChunkType.MODULE;
+
         List<CodeChunk> chunks = new ArrayList<>();
         for (ASTChunk astChunk : astChunks) {
             String entityName = astChunk.getEntityName();
             String chunkName = entityName != null ? entityName : FileUtils.extractFileName(file.path());
 
+            com.codebasecartographer.api.enums.ChunkType mappedType = ASTChunk.mapChunkType(astChunk.getChunkType());
+            if (mappedType == com.codebasecartographer.api.enums.ChunkType.MODULE) {
+                mappedType = fallbackChunkType;
+            }
+
             chunks.add(CodeChunk.builder()
                     .repository(repo)
                     .filePath(file.path())
-                    .chunkType(ASTChunk.mapChunkType(astChunk.getChunkType()))
+                    .chunkType(mappedType)
                     .chunkName(chunkName)
                     .content(astChunk.getContent())
                     .startLine(astChunk.getStartLine())

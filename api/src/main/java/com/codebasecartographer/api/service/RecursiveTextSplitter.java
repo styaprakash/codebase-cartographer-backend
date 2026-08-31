@@ -66,6 +66,8 @@ public class RecursiveTextSplitter {
         // Convert raw text chunks into ASTChunk DTOs with line number metadata
         List<ASTChunk> result = new ArrayList<>();
         int charOffset = 0;
+        String currentHeading = null;
+        Pattern headingPattern = Pattern.compile("(?m)^#{1,6}\\s+(.*)$");
 
         for (int i = 0; i < rawChunks.size(); i++) {
             String rawChunk = rawChunks.get(i);
@@ -77,12 +79,22 @@ public class RecursiveTextSplitter {
             int startLine = countLines(code, 0, actualStartOffset) + 1;
             int endLine = startLine + countNewlines(chunk);
 
+            // Update nearest preceding Markdown heading if found in this chunk
+            java.util.regex.Matcher matcher = headingPattern.matcher(chunk);
+            String lastHeadingInChunk = null;
+            while (matcher.find()) {
+                lastHeadingInChunk = matcher.group(1).trim();
+            }
+            if (lastHeadingInChunk != null) {
+                currentHeading = lastHeadingInChunk;
+            }
+
             result.add(ASTChunk.builder()
                     .content(chunk)
                     .startLine(startLine)
                     .endLine(endLine)
                     .scopeChain(null)
-                    .entityName(null)
+                    .entityName(currentHeading)
                     .chunkType("MODULE")  // Pure text splitting can't determine function/class types
                     .build());
 

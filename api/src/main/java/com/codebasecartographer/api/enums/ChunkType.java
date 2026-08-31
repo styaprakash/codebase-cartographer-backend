@@ -4,5 +4,6 @@ public enum ChunkType {
     FUNCTION,
     CLASS,
     MODULE,
+    DOC,
     UNKNOWN
 }
