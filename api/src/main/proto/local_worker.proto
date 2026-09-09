@@ -1,0 +1,77 @@
+syntax = "proto3";
+
+package localworker;
+
+option java_multiple_files = true;
+option java_package = "com.codebasecartographer.api.grpc.proto";
+option java_outer_classname = "LocalWorkerProto";
+
+// ─────────────────────────────────────────────────────────────
+// LocalWorkerService
+//
+// A single bidirectional streaming RPC for persistent
+// communication between the Rust CLI (Local Compute Agent)
+// and the Spring Boot backend.
+//
+// The CLI initiates the stream. Both sides send messages
+// through the open stream for the lifetime of the connection.
+// ─────────────────────────────────────────────────────────────
+
+service LocalWorkerService {
+
+  // Persistent bidirectional stream.
+  // The CLI calls this once on startup; the stream stays open
+  // until the CLI disconnects or the server shuts down.
+  rpc Connect (stream WorkerMessage) returns (stream ServerMessage);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Worker → Server envelope
+//
+// Uses oneof so new message types can be added without
+// changing the RPC signature or breaking existing clients.
+// ─────────────────────────────────────────────────────────────
+
+message WorkerMessage {
+  oneof payload {
+    WorkerHello       hello          = 1;
+    // Future fields (reserved numbers for planned messages):
+    // Heartbeat        heartbeat      = 2;
+    // JobAccepted      job_accepted   = 3;
+    // JobRejected      job_rejected   = 4;
+    // StreamChunk      stream_chunk   = 5;
+    // JobCompleted     job_completed  = 6;
+    // JobFailed        job_failed     = 7;
+    // JobCancelled     job_cancelled  = 8;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Server → Worker envelope
+// ─────────────────────────────────────────────────────────────
+
+message ServerMessage {
+  oneof payload {
+    ServerAck         ack            = 1;
+    // Future fields:
+    // JobAssignment    job_assignment = 2;
+    // CancelJob        cancel_job     = 3;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Milestone 1 — Connection establishment messages
+// ─────────────────────────────────────────────────────────────
+
+// Sent by CLI immediately after opening the stream.
+message WorkerHello {
+  string worker_id   = 1;  // Persistent UUID generated on first CLI install
+  string device_name = 2;  // Human-readable device name (e.g. "Satya's MacBook")
+  string cli_version = 3;  // CLI semver (e.g. "0.1.0")
+}
+
+// Sent by server in response to WorkerHello.
+message ServerAck {
+  bool   success = 1;
+  string message = 2;
+}
