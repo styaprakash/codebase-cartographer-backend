@@ -14,10 +14,16 @@ public class JwtConfig {
     //Maps to jwt.expiration in same application.yaml
     private long expiration;
 
+    //Maps to jwt.cli-expiration — shorter lifetime for CLI access tokens
+    private long cliExpiration = 3600000; // default 1 hour
+
     // Getters and Setters required by Spring to inject values
     public String getSecret() { return secret; }
     public void setSecret(String secret) { this.secret = secret; }
 
     public long getExpiration() { return expiration; }
     public void setExpiration( long expiration) { this.expiration = expiration; }
+
+    public long getCliExpiration() { return cliExpiration; }
+    public void setCliExpiration(long cliExpiration) { this.cliExpiration = cliExpiration; }
 }

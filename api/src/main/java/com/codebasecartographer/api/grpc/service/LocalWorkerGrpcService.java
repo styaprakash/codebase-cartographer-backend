@@ -1,10 +1,18 @@
 package com.codebasecartographer.api.grpc.service;
 
+import java.time.LocalDateTime;
+
+import com.codebasecartographer.api.entity.LocalWorker;
+import com.codebasecartographer.api.grpc.interceptor.GrpcJwtInterceptor;
+import com.codebasecartographer.api.grpc.proto.Heartbeat;
 import com.codebasecartographer.api.grpc.proto.LocalWorkerServiceGrpc;
+import com.codebasecartographer.api.grpc.proto.RegisterWorker;
 import com.codebasecartographer.api.grpc.proto.ServerAck;
 import com.codebasecartographer.api.grpc.proto.ServerMessage;
 import com.codebasecartographer.api.grpc.proto.WorkerHello;
 import com.codebasecartographer.api.grpc.proto.WorkerMessage;
+import com.codebasecartographer.api.grpc.registry.WorkerRegistry;
+import com.codebasecartographer.api.repository.LocalWorkerRepository;
 
 import io.grpc.stub.StreamObserver;
 import lombok.extern.slf4j.Slf4j;
@@ -14,58 +22,145 @@ import net.devh.boot.grpc.server.service.GrpcService;
  * gRPC service handling the persistent bidirectional stream
  * with a Local Compute Agent (Rust CLI).
  *
- * Milestone 1: Only handles WorkerHello → ServerAck.
- * Future milestones will add Heartbeat, Job dispatch, streaming, etc.
+ * Lifecycle:
+ * 1. CLI opens stream (authenticated via GrpcJwtInterceptor)
+ * 2. CLI sends RegisterWorker → server validates ownership, persists worker, registers connection
+ * 3. CLI sends periodic Heartbeat → server updates lastSeen
+ * 4. Stream closes → server unregisters connection, marks worker offline
  */
 @Slf4j
 @GrpcService
 public class LocalWorkerGrpcService extends LocalWorkerServiceGrpc.LocalWorkerServiceImplBase {
 
+    private final WorkerRegistry workerRegistry;
+    private final LocalWorkerRepository localWorkerRepository;
+
+    public LocalWorkerGrpcService(WorkerRegistry workerRegistry,
+                                   LocalWorkerRepository localWorkerRepository) {
+        this.workerRegistry = workerRegistry;
+        this.localWorkerRepository = localWorkerRepository;
+    }
+
     @Override
     public StreamObserver<WorkerMessage> connect(StreamObserver<ServerMessage> responseObserver) {
-        log.info("[gRPC] Local worker stream opened");
+        // userId was set by GrpcJwtInterceptor — guaranteed non-null here
+        String userId = GrpcJwtInterceptor.USER_ID_CTX_KEY.get();
+        log.info("[gRPC] Authenticated stream opened for user: {}", userId);
 
         return new StreamObserver<>() {
+
+            // Tracks the workerId once registration is complete
+            private volatile String registeredWorkerId = null;
 
             @Override
             public void onNext(WorkerMessage message) {
                 switch (message.getPayloadCase()) {
+                    case REGISTER -> handleRegister(message.getRegister(), responseObserver);
                     case HELLO -> handleHello(message.getHello(), responseObserver);
-                    case PAYLOAD_NOT_SET -> log.warn("[gRPC] Received message with no payload set");
-                    default -> log.warn("[gRPC] Received unhandled message type: {}", message.getPayloadCase());
+                    case HEARTBEAT -> handleHeartbeat(message.getHeartbeat());
+                    case PAYLOAD_NOT_SET -> log.warn("[gRPC] Received message with no payload");
+                    default -> log.warn("[gRPC] Unhandled message type: {}", message.getPayloadCase());
                 }
             }
 
             @Override
             public void onError(Throwable t) {
-                // Fires when the CLI disconnects unexpectedly (network loss, crash, kill).
-                // In future milestones this will trigger worker cleanup and job failure.
-                log.warn("[gRPC] Local worker stream error: {}", t.getMessage());
+                log.warn("[gRPC] Stream error for user {}: {}", userId, t.getMessage());
+                cleanup();
             }
 
             @Override
             public void onCompleted() {
-                // Fires when the CLI gracefully closes the stream.
-                log.info("[gRPC] Local worker stream closed by client");
+                log.info("[gRPC] Stream closed by client (user: {})", userId);
+                cleanup();
                 responseObserver.onCompleted();
             }
+
+            // ── Message handlers ─────────────────────────────────
+
+            private void handleRegister(RegisterWorker register, StreamObserver<ServerMessage> out) {
+                String workerId = register.getWorkerId();
+                log.info("[gRPC] RegisterWorker — workerId={}, device={}, cli={}, models={}",
+                        workerId, register.getDeviceName(), register.getCliVersion(),
+                        register.getAvailableModelsList());
+
+                // Persist or update worker identity in database
+                LocalWorker worker = localWorkerRepository.findByWorkerId(workerId)
+                        .map(existing -> {
+                            // Verify ownership: the authenticated user must own this worker
+                            if (!existing.getUserId().equals(userId)) {
+                                log.warn("[gRPC] Worker {} belongs to user {}, but user {} tried to register it",
+                                        workerId, existing.getUserId(), userId);
+                                sendAck(out, false, "Worker belongs to another user");
+                                return null;
+                            }
+                            // Update metadata on reconnect
+                            existing.setDeviceName(register.getDeviceName());
+                            existing.setCliVersion(register.getCliVersion());
+                            existing.setLastSeenAt(LocalDateTime.now());
+                            return localWorkerRepository.save(existing);
+                        })
+                        .orElseGet(() -> {
+                            // First time this worker connects — create identity
+                            LocalWorker newWorker = LocalWorker.builder()
+                                    .workerId(workerId)
+                                    .userId(userId)
+                                    .deviceName(register.getDeviceName())
+                                    .cliVersion(register.getCliVersion())
+                                    .lastSeenAt(LocalDateTime.now())
+                                    .build();
+                            return localWorkerRepository.save(newWorker);
+                        });
+
+                if (worker == null) return; // ownership validation failed
+
+                // Register the active gRPC connection
+                registeredWorkerId = workerId;
+                workerRegistry.register(workerId, userId, out);
+
+                sendAck(out, true, "Worker registered successfully");
+                log.info("[gRPC] Worker {} is now ONLINE", workerId);
+            }
+
+            private void handleHello(WorkerHello hello, StreamObserver<ServerMessage> out) {
+                // Milestone 1 backward compat — treat as a lightweight register
+                log.info("[gRPC] WorkerHello (legacy) — workerId={}, device={}, cli={}",
+                        hello.getWorkerId(), hello.getDeviceName(), hello.getCliVersion());
+                sendAck(out, true, "Connection established");
+            }
+
+            private void handleHeartbeat(Heartbeat heartbeat) {
+                if (registeredWorkerId != null) {
+                    workerRegistry.recordHeartbeat(registeredWorkerId);
+                    // Update lastSeenAt in database periodically
+                    localWorkerRepository.findByWorkerId(registeredWorkerId)
+                            .ifPresent(worker -> {
+                                worker.setLastSeenAt(LocalDateTime.now());
+                                localWorkerRepository.save(worker);
+                            });
+                    log.debug("[gRPC] Heartbeat from worker {}", registeredWorkerId);
+                }
+            }
+
+            // ── Cleanup on disconnect ────────────────────────────
+
+            private void cleanup() {
+                if (registeredWorkerId != null) {
+                    workerRegistry.unregister(registeredWorkerId);
+                    log.info("[gRPC] Worker {} is now OFFLINE", registeredWorkerId);
+                }
+            }
+
+            // ── Utility ──────────────────────────────────────────
+
+            private void sendAck(StreamObserver<ServerMessage> out, boolean success, String message) {
+                out.onNext(ServerMessage.newBuilder()
+                        .setAck(ServerAck.newBuilder()
+                                .setSuccess(success)
+                                .setMessage(message)
+                                .build())
+                        .build());
+            }
         };
-    }
-
-    // ── Milestone 1: Hello / Ack ────────────────────────────────────
-
-    private void handleHello(WorkerHello hello, StreamObserver<ServerMessage> responseObserver) {
-        log.info("[gRPC] Worker hello received — workerId={}, device={}, cliVersion={}",
-                hello.getWorkerId(), hello.getDeviceName(), hello.getCliVersion());
-
-        ServerMessage ack = ServerMessage.newBuilder()
-                .setAck(ServerAck.newBuilder()
-                        .setSuccess(true)
-                        .setMessage("Connection established")
-                        .build())
-                .build();
-
-        responseObserver.onNext(ack);
-        log.info("[gRPC] Sent acknowledgement to worker {}", hello.getWorkerId());
     }
 }

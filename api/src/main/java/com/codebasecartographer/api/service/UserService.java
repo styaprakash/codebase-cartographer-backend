@@ -50,6 +50,24 @@ public class UserService {
         return toResponse(user);
     }
 
+    // Method 1b: called during CLI authentication (Device Flow).
+    // Finds the existing user or creates a new one WITHOUT overwriting
+    // the stored GitHub access token (which the browser flow manages).
+    @Transactional
+    public UserResponse findOrCreateUserFromGithubProfile(String githubId, String name, String email) {
+        User user = userRepository.findByGithubId(githubId)
+            .orElseGet(() -> {
+                User newUser = User.builder()
+                    .githubId(githubId)
+                    .name(name)
+                    .email(email)
+                    .dailyQueryCount(0)
+                    .build();
+                return userRepository.save(newUser);
+            });
+        return toResponse(user);
+    }
+
     //Method 2: Called by GET /api/me, return logged in user's info as DTO
     public UserResponse getUserById (String id){
         User user = userRepository.findById(id)

@@ -37,6 +37,20 @@ public class JwtService {
             .compact(); //build the final JWT string
     }
 
+    // Called during CLI authentication — shorter-lived token for gRPC connections.
+    // Same signing key and validation logic as browser tokens.
+    public String generateCliToken(String userId) {
+        return Jwts.builder()
+            .subject(userId)
+            .claim("type", "cli")
+            .issuedAt(new Date())
+            .expiration(new Date(
+                System.currentTimeMillis() + jwtConfig.getCliExpiration()
+            ))
+            .signWith(getSigningKey())
+            .compact();
+    }
+
     // ── Extract UserId ────────────────────────────────────────────
     // Called on every request by JwtAuthFilter
     // Reads userId from token payload

@@ -34,15 +34,16 @@ service LocalWorkerService {
 
 message WorkerMessage {
   oneof payload {
-    WorkerHello       hello          = 1;
-    // Future fields (reserved numbers for planned messages):
-    // Heartbeat        heartbeat      = 2;
-    // JobAccepted      job_accepted   = 3;
-    // JobRejected      job_rejected   = 4;
-    // StreamChunk      stream_chunk   = 5;
-    // JobCompleted     job_completed  = 6;
-    // JobFailed        job_failed     = 7;
-    // JobCancelled     job_cancelled  = 8;
+    WorkerHello       hello          = 1;  // Milestone 1 (kept for backward compat)
+    RegisterWorker    register       = 2;  // Milestone 2 — full registration
+    Heartbeat         heartbeat      = 3;  // Milestone 2 — keep-alive
+    // Future fields (reserved for Milestone 3+):
+    // JobAccepted      job_accepted   = 4;
+    // JobRejected      job_rejected   = 5;
+    // StreamChunk      stream_chunk   = 6;
+    // JobCompleted     job_completed  = 7;
+    // JobFailed        job_failed     = 8;
+    // JobCancelled     job_cancelled  = 9;
   }
 }
 
@@ -60,18 +61,36 @@ message ServerMessage {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Milestone 1 — Connection establishment messages
+// Milestone 1 — Connection establishment (kept for compat)
 // ─────────────────────────────────────────────────────────────
 
 // Sent by CLI immediately after opening the stream.
 message WorkerHello {
-  string worker_id   = 1;  // Persistent UUID generated on first CLI install
-  string device_name = 2;  // Human-readable device name (e.g. "Satya's MacBook")
-  string cli_version = 3;  // CLI semver (e.g. "0.1.0")
+  string worker_id   = 1;
+  string device_name = 2;
+  string cli_version = 3;
 }
 
-// Sent by server in response to WorkerHello.
+// General-purpose server acknowledgement.
 message ServerAck {
   bool   success = 1;
   string message = 2;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Milestone 2 — Registration and Heartbeat
+// ─────────────────────────────────────────────────────────────
+
+// Sent by CLI immediately after opening the authenticated stream.
+// Richer than WorkerHello — includes model inventory.
+message RegisterWorker {
+  string worker_id              = 1;  // Persistent UUID generated on first CLI install
+  string device_name            = 2;  // Human-readable name (e.g. "Satya's MacBook")
+  string cli_version            = 3;  // CLI semver (e.g. "0.1.0")
+  repeated string available_models = 4;  // Ollama models available locally
+}
+
+// Sent by CLI periodically (e.g. every 30 seconds).
+message Heartbeat {
+  int64 timestamp = 1;  // Unix milliseconds
 }
