@@ -19,6 +19,11 @@
 			"key": "repoId",
 			"value": "",
 			"type": "string"
+		},
+		{
+			"key": "sessionId",
+			"value": "",
+			"type": "string"
 		}
 	],
 	"auth": {
@@ -65,8 +70,14 @@
 						},
 						"url": {
 							"raw": "{{baseUrl}}/api/auth/callback",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "auth", "callback"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"callback"
+							]
 						},
 						"auth": {
 							"type": "noauth"
@@ -81,8 +92,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{baseUrl}}/api/auth/logout",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "auth", "logout"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"logout"
+							]
 						}
 					},
 					"response": []
@@ -99,8 +116,13 @@
 						"header": [],
 						"url": {
 							"raw": "{{baseUrl}}/api/me",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "me"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"me"
+							]
 						}
 					},
 					"response": []
@@ -112,8 +134,13 @@
 						"header": [],
 						"url": {
 							"raw": "{{baseUrl}}/api/me",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "me"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"me"
+							]
 						}
 					},
 					"response": []
@@ -125,8 +152,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{baseUrl}}/api/me/data",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "me", "data"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"me",
+								"data"
+							]
 						}
 					},
 					"response": []
@@ -143,8 +176,13 @@
 						"header": [],
 						"url": {
 							"raw": "{{baseUrl}}/api/repos",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "repos"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"repos"
+							]
 						}
 					},
 					"response": []
@@ -156,8 +194,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{baseUrl}}/api/repos/{{repoId}}",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "repos", "{{repoId}}"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"repos",
+								"{{repoId}}"
+							]
 						}
 					},
 					"response": []
@@ -178,8 +222,13 @@
 						},
 						"url": {
 							"raw": "{{baseUrl}}/api/repos",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "repos"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"repos"
+							]
 						}
 					},
 					"response": []
@@ -200,8 +249,15 @@
 						},
 						"url": {
 							"raw": "{{baseUrl}}/api/repos/{{repoId}}/index",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "repos", "{{repoId}}", "index"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"repos",
+								"{{repoId}}",
+								"index"
+							]
 						}
 					},
 					"response": []
@@ -213,8 +269,15 @@
 						"header": [],
 						"url": {
 							"raw": "{{baseUrl}}/api/repos/{{repoId}}/status",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "repos", "{{repoId}}", "status"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"repos",
+								"{{repoId}}",
+								"status"
+							]
 						}
 					},
 					"response": []
@@ -226,8 +289,15 @@
 						"header": [],
 						"url": {
 							"raw": "{{baseUrl}}/api/repos/{{repoId}}/reset-status",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "repos", "{{repoId}}", "reset-status"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"repos",
+								"{{repoId}}",
+								"reset-status"
+							]
 						}
 					},
 					"response": []
@@ -249,10 +319,17 @@
 						],
 						"url": {
 							"raw": "{{baseUrl}}/api/sse/indexing/{{repoId}}",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "sse", "indexing", "{{repoId}}"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"sse",
+								"indexing",
+								"{{repoId}}"
+							]
 						},
-						"description": "Opens an SSE connection to receive real-time indexing progress events.\n\nEvent types:\n- `file_event`: Sent per-file with status, file_path, progress, total_files.\n- `status`: Sent when indexing status changes (INDEXING → INDEXED or FAILED).\n\nThe stream auto-completes when indexing finishes or fails."
+						"description": "Opens an SSE connection to receive real-time indexing progress events.\n\nEvent types:\n- `file_event`: Sent per-file with status, file_path, progress, total_files.\n- `status`: Sent when indexing status changes (INDEXING \u2192 INDEXED or FAILED).\n\nThe stream auto-completes when indexing finishes or fails."
 					},
 					"response": []
 				}
@@ -277,8 +354,14 @@
 						},
 						"url": {
 							"raw": "{{baseUrl}}/api/chat/{{repoId}}",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "chat", "{{repoId}}"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"chat",
+								"{{repoId}}"
+							]
 						},
 						"description": "Sends a question to the RAG pipeline for a specific repository.\n\nThe `llmProvider` field selects which generative model to use. Available values:\n- OLLAMA_LLAMA3\n- OLLAMA_LLAMA3_1\n- OLLAMA_QWEN2_5\n- OLLAMA_DEEPSEEK_CODER\n- OPENAI_GPT4\n- DEEPSEEK_V4\n\nResponse includes the AI-generated answer and source file citations."
 					},
@@ -305,8 +388,15 @@
 						},
 						"url": {
 							"raw": "{{baseUrl}}/api/repos/{{repoId}}/query",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "repos", "{{repoId}}", "query"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"repos",
+								"{{repoId}}",
+								"query"
+							]
 						},
 						"description": "Legacy query endpoint from QueryController. Consider using the new RAG Chat endpoint (POST /api/chat/{repoId}) instead."
 					},
@@ -319,8 +409,15 @@
 						"header": [],
 						"url": {
 							"raw": "{{baseUrl}}/api/repos/{{repoId}}/queries",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "repos", "{{repoId}}", "queries"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"repos",
+								"{{repoId}}",
+								"queries"
+							]
 						}
 					},
 					"response": []
@@ -346,8 +443,15 @@
 						},
 						"url": {
 							"raw": "{{baseUrl}}/api/repos/{{repoId}}/search",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "repos", "{{repoId}}", "search"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"repos",
+								"{{repoId}}",
+								"search"
+							]
 						},
 						"description": "Performs a semantic similarity search on indexed code chunks.\n\n- `query`: The natural language search query.\n- `threshold`: Minimum cosine similarity score (default 0.7).\n- `limit`: Max number of results (default 10)."
 					},
@@ -365,8 +469,15 @@
 						"header": [],
 						"url": {
 							"raw": "{{baseUrl}}/api/repos/{{repoId}}/graph",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "repos", "{{repoId}}", "graph"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"repos",
+								"{{repoId}}",
+								"graph"
+							]
 						}
 					},
 					"response": []
@@ -378,8 +489,15 @@
 						"header": [],
 						"url": {
 							"raw": "{{baseUrl}}/api/repos/{{repoId}}/files",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "repos", "{{repoId}}", "files"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"repos",
+								"{{repoId}}",
+								"files"
+							]
 						}
 					},
 					"response": []
@@ -415,8 +533,15 @@
 						},
 						"url": {
 							"raw": "{{baseUrl}}/api/webhooks/github/push",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "webhooks", "github", "push"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"webhooks",
+								"github",
+								"push"
+							]
 						},
 						"auth": {
 							"type": "noauth"
@@ -440,8 +565,12 @@
 						"header": [],
 						"url": {
 							"raw": "{{baseUrl}}/?name=World",
-							"host": ["{{baseUrl}}"],
-							"path": [""],
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								""
+							],
 							"query": [
 								{
 									"key": "name",
@@ -449,6 +578,118 @@
 								}
 							]
 						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "CLI Authentication & Sessions",
+			"item": [
+				{
+					"name": "CLI Token Exchange",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"githubAccessToken\": \"gho_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\n  \"deviceName\": \"Satya's MacBook Pro\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/auth/cli/exchange",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"cli",
+								"exchange"
+							]
+						},
+						"auth": {
+							"type": "noauth"
+						},
+						"description": "Exchanges a GitHub Device Flow access token for a short-lived API access token and a long-lived refresh token."
+					},
+					"response": []
+				},
+				{
+					"name": "CLI Token Refresh",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"refreshToken\": \"crt_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/auth/cli/refresh",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"cli",
+								"refresh"
+							]
+						},
+						"auth": {
+							"type": "noauth"
+						},
+						"description": "Uses a refresh token to obtain a new access token and a rotated refresh token."
+					},
+					"response": []
+				},
+				{
+					"name": "List CLI Sessions",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/cli/sessions",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"cli",
+								"sessions"
+							]
+						},
+						"description": "Lists all active CLI sessions for the authenticated user."
+					},
+					"response": []
+				},
+				{
+					"name": "Revoke CLI Session",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/cli/sessions/{{sessionId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"cli",
+								"sessions",
+								"{{sessionId}}"
+							]
+						},
+						"description": "Revokes a specific CLI session. The refresh token becomes invalid immediately."
 					},
 					"response": []
 				}
