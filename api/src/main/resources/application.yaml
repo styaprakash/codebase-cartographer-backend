@@ -11,7 +11,9 @@ spring:
   application:
     name: codebase-cartographer-api
   config:
-    import: optional:file:.env[.properties]
+    import:
+      - optional:file:.env[.properties]
+      - optional:file:.env.local[.properties]
   lifecycle:
     timeout-per-shutdown-phase: 30s
   flyway:
