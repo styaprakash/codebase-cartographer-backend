@@ -1,4 +1,4 @@
-package com.cartographer.api;
+package com.codebasecartographer.api;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;

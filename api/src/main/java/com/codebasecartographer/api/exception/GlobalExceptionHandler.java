@@ -171,6 +171,17 @@ public class GlobalExceptionHandler {
         return problem;
     }
 
+    // 503 Service Unavailable
+    @ExceptionHandler(ServiceUnavailableException.class)
+    public ProblemDetail handleServiceUnavailable(ServiceUnavailableException ex) {
+        log.warn("Service unavailable: {}", ex.getMessage());
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage());
+        problem.setTitle("Service Unavailable");
+        problem.setType(URI.create("https://codebasecartographer.com/errors/service-unavailable"));
+        problem.setProperty("timestamp", LocalDateTime.now());
+        return problem;
+    }
+
     // ── 500 Internal Server Error ─────────────────────────────────
     // Safety net — catches anything unhandled
     @ExceptionHandler(Throwable.class)

@@ -11,8 +11,11 @@ import com.codebasecartographer.api.grpc.proto.ServerAck;
 import com.codebasecartographer.api.grpc.proto.ServerMessage;
 import com.codebasecartographer.api.grpc.proto.WorkerHello;
 import com.codebasecartographer.api.grpc.proto.WorkerMessage;
+import com.codebasecartographer.api.grpc.proto.JobAccepted;
+import com.codebasecartographer.api.grpc.proto.JobRejected;
 import com.codebasecartographer.api.grpc.registry.WorkerRegistry;
 import com.codebasecartographer.api.repository.LocalWorkerRepository;
+import com.codebasecartographer.api.service.LocalJobService;
 
 import io.grpc.stub.StreamObserver;
 import lombok.extern.slf4j.Slf4j;
@@ -34,11 +37,14 @@ public class LocalWorkerGrpcService extends LocalWorkerServiceGrpc.LocalWorkerSe
 
     private final WorkerRegistry workerRegistry;
     private final LocalWorkerRepository localWorkerRepository;
+    private final LocalJobService localJobService;
 
     public LocalWorkerGrpcService(WorkerRegistry workerRegistry,
-                                   LocalWorkerRepository localWorkerRepository) {
+                                   LocalWorkerRepository localWorkerRepository,
+                                   LocalJobService localJobService) {
         this.workerRegistry = workerRegistry;
         this.localWorkerRepository = localWorkerRepository;
+        this.localJobService = localJobService;
     }
 
     @Override
@@ -58,6 +64,8 @@ public class LocalWorkerGrpcService extends LocalWorkerServiceGrpc.LocalWorkerSe
                     case REGISTER -> handleRegister(message.getRegister(), responseObserver);
                     case HELLO -> handleHello(message.getHello(), responseObserver);
                     case HEARTBEAT -> handleHeartbeat(message.getHeartbeat());
+                    case JOB_ACCEPTED -> handleJobAccepted(message.getJobAccepted());
+                    case JOB_REJECTED -> handleJobRejected(message.getJobRejected());
                     case PAYLOAD_NOT_SET -> log.warn("[gRPC] Received message with no payload");
                     default -> log.warn("[gRPC] Unhandled message type: {}", message.getPayloadCase());
                 }
@@ -142,11 +150,28 @@ public class LocalWorkerGrpcService extends LocalWorkerServiceGrpc.LocalWorkerSe
                 }
             }
 
+            private void handleJobAccepted(JobAccepted jobAccepted) {
+                if (registeredWorkerId != null) {
+                    localJobService.handleJobAccepted(registeredWorkerId, jobAccepted.getJobId());
+                } else {
+                    log.warn("[gRPC] Received JobAccepted but worker is not registered");
+                }
+            }
+
+            private void handleJobRejected(JobRejected jobRejected) {
+                if (registeredWorkerId != null) {
+                    localJobService.handleJobRejected(registeredWorkerId, jobRejected.getJobId(), jobRejected.getReason());
+                } else {
+                    log.warn("[gRPC] Received JobRejected but worker is not registered");
+                }
+            }
+
             // ── Cleanup on disconnect ────────────────────────────
 
             private void cleanup() {
                 if (registeredWorkerId != null) {
                     workerRegistry.unregister(registeredWorkerId);
+                    localJobService.handleWorkerDisconnect(registeredWorkerId);
                     log.info("[gRPC] Worker {} is now OFFLINE", registeredWorkerId);
                 }
             }

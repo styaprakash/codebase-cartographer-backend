@@ -37,13 +37,12 @@ message WorkerMessage {
     WorkerHello       hello          = 1;  // Milestone 1 (kept for backward compat)
     RegisterWorker    register       = 2;  // Milestone 2 — full registration
     Heartbeat         heartbeat      = 3;  // Milestone 2 — keep-alive
-    // Future fields (reserved for Milestone 3+):
-    // JobAccepted      job_accepted   = 4;
-    // JobRejected      job_rejected   = 5;
-    // StreamChunk      stream_chunk   = 6;
-    // JobCompleted     job_completed  = 7;
-    // JobFailed        job_failed     = 8;
-    // JobCancelled     job_cancelled  = 9;
+    JobAccepted       job_accepted   = 4;  // Milestone 3
+    JobRejected       job_rejected   = 5;  // Milestone 3
+    StreamChunk       stream_chunk   = 6;  // Milestone 4
+    JobCompleted      job_completed  = 7;  // Milestone 4
+    JobFailed         job_failed     = 8;  // Milestone 4
+    // Cancelled logic can use field 9 if needed
   }
 }
 
@@ -54,9 +53,8 @@ message WorkerMessage {
 message ServerMessage {
   oneof payload {
     ServerAck         ack            = 1;
-    // Future fields:
-    // JobAssignment    job_assignment = 2;
-    // CancelJob        cancel_job     = 3;
+    JobAssignment     job_assignment = 2;  // Milestone 3
+    CancelJob         cancel_job     = 3;  // Milestone 4
   }
 }
 
@@ -93,4 +91,47 @@ message RegisterWorker {
 // Sent by CLI periodically (e.g. every 30 seconds).
 message Heartbeat {
   int64 timestamp = 1;  // Unix milliseconds
+}
+
+// ─────────────────────────────────────────────────────────────
+// Milestone 3 — Job Dispatch
+// ─────────────────────────────────────────────────────────────
+
+message JobAssignment {
+  string job_id = 1;
+  string model = 2;
+  string prompt = 3;
+}
+
+message JobAccepted {
+  string job_id = 1;
+}
+
+message JobRejected {
+  string job_id = 1;
+  string reason = 2;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Milestone 4 — Execution & Streaming
+// ─────────────────────────────────────────────────────────────
+
+message StreamChunk {
+  string job_id = 1;
+  string content = 2;
+}
+
+message JobCompleted {
+  string job_id = 1;
+  string full_response = 2;
+  int32 tokens_used = 3;
+}
+
+message JobFailed {
+  string job_id = 1;
+  string error = 2;
+}
+
+message CancelJob {
+  string job_id = 1;
 }
